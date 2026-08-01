@@ -49,7 +49,7 @@
       AlignLeft, Download, Upload, Info, X, Check, FileText 
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
-    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updatePassword } from 'firebase/auth';
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
     import { getFirestore, doc, onSnapshot, setDoc } from 'firebase/firestore';
 
     // Firebase 連線設定（apiKey 為網頁版公開金鑰，安全由 Firestore 規則 + 登入控管）
@@ -244,7 +244,7 @@
                 </button>
              )}
              
-             {!task.status.includes('done') && (
+             {!(task.status || '').includes('done') && (
                <div className="flex items-center gap-2 shrink-0">
                  <div className="flex items-center gap-1.5 text-slate-500 bg-white px-2 py-1.5 rounded-lg border border-slate-200 font-bold text-xs shadow-sm group/date relative">
                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
@@ -265,15 +265,34 @@
     // 純 SVG 圓環圖（取代 recharts，避免 CDN 相依問題）
     const polarXY = (cx, cy, r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
     const SvgDonut = ({ data, onSliceClick }) => {
-      const size = 400, cx = 200, cy = 200, rOut = 112, rIn = 72;
-      const total = data.reduce((s, d) => s + (d.value || 0), 0);
+      const cx = 200, cy = 200, rOut = 112, rIn = 72;
+      const items = data.filter(d => (d.value || 0) > 0);
+      const total = items.reduce((s, d) => s + d.value, 0);
       if (!total) return null;
-      const gap = data.length > 1 ? 0.03 : 0;
+      const clip = (n) => (n && n.length > 9 ? n.slice(0, 8) + '…' : n);
+      const clickProps = (d) => ({ onClick: () => onSliceClick && onSliceClick(d), style: { cursor: onSliceClick ? 'pointer' : 'default' } });
+
+      // 只有一個分類（100%）：整條弧起訖點重合會整個消失 → 直接畫一整圈
+      if (items.length === 1) {
+        const d0 = items[0];
+        return (
+          <svg viewBox="-60 0 520 400" className="w-full h-full">
+            <circle cx={cx} cy={cy} r={(rOut + rIn) / 2} fill="none" stroke={d0.color} strokeWidth={rOut - rIn} {...clickProps(d0)}>
+              <title>{`${d0.name}：${d0.value} 分鐘 (100%)`}</title>
+            </circle>
+            <text x={cx} y={cy - 8} textAnchor="middle" fill={d0.color} fontSize="16" fontWeight="900">{clip(d0.name)}</text>
+            <text x={cx} y={cy + 22} textAnchor="middle" fill={d0.color} fontSize="26" fontWeight="900">100%</text>
+          </svg>
+        );
+      }
+
+      const gap = 0.03;
       let angle = -Math.PI / 2;
-      const segs = data.map((d) => {
-        const frac = (d.value || 0) / total;
+      const segs = items.map((d) => {
+        const frac = d.value / total;
         const sweep = frac * Math.PI * 2;
-        const a0 = angle + gap / 2, a1 = angle + sweep - gap / 2;
+        const useGap = sweep > gap * 1.5 ? gap : 0;    // 極小分類不套間隙，避免弧線反向渲染成錯誤扇形
+        const a0 = angle + useGap / 2, a1 = angle + sweep - useGap / 2;
         angle += sweep;
         const [ox0, oy0] = polarXY(cx, cy, rOut, a0);
         const [ox1, oy1] = polarXY(cx, cy, rOut, a1);
@@ -282,18 +301,18 @@
         const large = (a1 - a0) > Math.PI ? 1 : 0;
         const path = `M ${ox0} ${oy0} A ${rOut} ${rOut} 0 ${large} 1 ${ox1} ${oy1} L ${ix1} ${iy1} A ${rIn} ${rIn} 0 ${large} 0 ${ix0} ${iy0} Z`;
         const mid = (a0 + a1) / 2;
-        const [lx, ly] = polarXY(cx, cy, rOut + 34, mid);
+        const [lx, ly] = polarXY(cx, cy, rOut + 26, mid);
         return { d, path, lx, ly, pct: Math.round(frac * 100) };
       });
       return (
-        <svg viewBox="0 0 400 400" className="w-full h-full">
+        <svg viewBox="-60 0 520 400" className="w-full h-full">
           {segs.map((s, i) => (
-            <g key={i} onClick={() => onSliceClick && onSliceClick(s.d)} style={{ cursor: onSliceClick ? 'pointer' : 'default' }}>
+            <g key={i} {...clickProps(s.d)}>
               <path d={s.path} fill={s.d.color}>
                 <title>{`${s.d.name}：${s.d.value} 分鐘 (${s.pct}%)`}</title>
               </path>
               <text x={s.lx} y={s.ly} fill={s.d.color} textAnchor={s.lx > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="14" fontWeight="900">
-                <tspan x={s.lx} dy="-0.6em">{s.d.name}</tspan>
+                <tspan x={s.lx} dy="-0.6em">{clip(s.d.name)}</tspan>
                 <tspan x={s.lx} dy="1.6em" fontSize="22">{s.pct}%</tspan>
               </text>
             </g>
@@ -337,64 +356,95 @@
       const [customEnd, setCustomEnd] = useState(() => toDateInput(new Date()));
       const [draggedNoteIndex, setDraggedNoteIndex] = useState(null);
       const fileInputRef = useRef(null);
-      // 雲端同步：記錄「最後一次與雲端一致的內容」，用來避免自己寫、自己又收到而形成迴圈
-      const syncedJsonRef = useRef(null);
-      const saveTimerRef = useRef(null);
+      // 雲端同步用：
+      const syncedJsonRef = useRef(null);   // 最後一次與雲端一致的內容（healed 後），避免多餘回寫
+      const saveTimerRef = useRef(null);     // 去抖計時器
+      const canWriteRef = useRef(false);     // 只有「成功讀過一次雲端」後才允許寫；讀失敗時保持 false，避免用空資料覆蓋雲端
+      const lastWriteIdRef = useRef(null);   // 標記「這筆是我自己寫的」，用來精準略過自己的回音（比 JSON 比對可靠）
+      const flushSaveRef = useRef(() => {}); // 指向最新的「立即存檔」函式，供關頁前 flush 呼叫
+      const [syncStatus, setSyncStatus] = useState('idle'); // idle | saving | saved | error
 
-      // 雲端同步（讀）：訂閱這位使用者在 Firestore 的資料。
-      // 任何裝置（手機/電腦）的改動都會即時同步過來。
+      // 產生目前本地完整內容（供比對與寫入共用）
+      const buildLocalPayload = () => {
+        let catMap = {};
+        try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
+        return { tasks, projects, users, notes, catMap };
+      };
+
+      // 立即把待寫資料寫回雲端（去抖到期、或關頁前 flush 都走這裡）
+      flushSaveRef.current = () => {
+        if (!uid || !canWriteRef.current) return;              // 尚未成功讀過雲端 → 絕不寫，避免覆蓋真資料
+        if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); saveTimerRef.current = null; }
+        const payload = buildLocalPayload();
+        const localJson = JSON.stringify(payload);
+        if (localJson === syncedJsonRef.current) return;       // 沒有實質變化
+        syncedJsonRef.current = localJson;
+        const writeId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        lastWriteIdRef.current = writeId;
+        setSyncStatus('saving');
+        setDoc(doc(fbDb, 'users', uid, 'state', 'main'), { ...payload, writeId, updatedAt: Date.now() })
+          .then(() => setSyncStatus('saved'))
+          .catch(e => { console.error("Sync save error:", e); setSyncStatus('error'); });
+      };
+
+      // 雲端同步（讀）：訂閱這位使用者的資料，任何裝置的改動都即時同步過來。
       useEffect(() => {
         if (!uid) return;
+        // 換使用者時重置同步狀態
+        canWriteRef.current = false;
+        lastWriteIdRef.current = null;
+        syncedJsonRef.current = null;
+        setSyncStatus('idle');
         const ref = doc(fbDb, 'users', uid, 'state', 'main');
         const unsub = onSnapshot(ref, (snap) => {
+          // 自己剛寫、還沒落地伺服器的本地回音 → 略過
+          if (snap.metadata && snap.metadata.hasPendingWrites) return;
           try {
             if (snap.exists()) {
               const d = snap.data() || {};
-              const payload = {
-                tasks: Array.isArray(d.tasks) ? d.tasks : [],
-                projects: Array.isArray(d.projects) && d.projects.length ? d.projects : DEFAULT_PROJECTS,
-                users: Array.isArray(d.users) ? d.users : [],
-                notes: Array.isArray(d.notes) ? d.notes : [],
-                catMap: d.catMap || {}
-              };
-              const incoming = JSON.stringify(payload);
-              if (incoming !== syncedJsonRef.current) {
-                syncedJsonRef.current = incoming;
+              // 若這筆正是我自己剛寫上去的（writeId 相符）→ state 已是最新，不需再套用
+              if (!(d.writeId && d.writeId === lastWriteIdRef.current)) {
+                const payload = {
+                  tasks: Array.isArray(d.tasks) ? d.tasks : [],
+                  projects: Array.isArray(d.projects) && d.projects.length ? d.projects : DEFAULT_PROJECTS,
+                  users: Array.isArray(d.users) ? d.users : [],
+                  notes: Array.isArray(d.notes) ? d.notes : [],
+                  catMap: d.catMap || {}
+                };
+                const healedTasks = payload.tasks.map(t => healTaskData(t));
+                const mergedUsers = [...new Set([...DEFAULT_USERS, ...payload.users])];
                 localStorage.setItem('taskflow_catmap', JSON.stringify(payload.catMap));
-                setTasks(payload.tasks.map(t => healTaskData(t)));
+                setTasks(healedTasks);
                 setProjects(payload.projects);
-                setUsers([...new Set([...DEFAULT_USERS, ...payload.users])]);
+                setUsers(mergedUsers);
                 setNotes(payload.notes);
+                // 記錄「已與雲端一致」的 healed 版本，寫效果才不會多寫一次
+                syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap });
               }
-            } else {
-              // 這位使用者第一次登入、雲端尚無資料 → 用預設起步（存檔效果會自動建立文件）
-              syncedJsonRef.current = null;
             }
+            // exists 或 not-exists（首次登入）都算「成功讀到」→ 之後才允許寫入
+            canWriteRef.current = true;
+            setSyncStatus(prev => prev === 'error' ? 'idle' : prev);
           } catch (e) {
             console.error("Sync load error:", e);
           }
           setIsLoaded(true);
         }, (err) => {
+          // 讀失敗（暫時斷線 / 權限跳動）→ 不開放寫入，避免用空白覆蓋雲端真資料
           console.error("Firestore onSnapshot error:", err);
-          setIsLoaded(true);
+          setSyncStatus('error');
+          setIsLoaded(true);   // 讓畫面顯示，但 canWriteRef 保持 false（不會亂寫）
         });
         return () => unsub();
       }, [uid]);
 
-      // 雲端同步（寫）：資料一變動就寫回雲端（去抖 800ms，避免每個字都寫一次）
+      // 雲端同步（寫）：資料變動 → 去抖 800ms 後寫回；只有成功讀過雲端才會寫。
       useEffect(() => {
-        if (!isLoaded || !uid) return;
-        let catMap = {};
-        try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
-        const payload = { tasks, projects, users, notes, catMap };
-        const localJson = JSON.stringify(payload);
-        if (localJson === syncedJsonRef.current) return;   // 與雲端一致，不用寫
-        syncedJsonRef.current = localJson;
+        if (!isLoaded || !uid || !canWriteRef.current) return;
+        if (JSON.stringify(buildLocalPayload()) === syncedJsonRef.current) return;  // 沒有實質變化
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = setTimeout(() => {
-          setDoc(doc(fbDb, 'users', uid, 'state', 'main'), { ...payload, updatedAt: Date.now() })
-            .catch(e => console.error("Sync save error:", e));
-        }, 800);
+        saveTimerRef.current = setTimeout(() => flushSaveRef.current(), 800);
+        return () => { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); } };
       }, [tasks, projects, users, notes, isLoaded, uid]);
 
       useEffect(() => {
@@ -403,16 +453,17 @@
         return () => clearInterval(interval);
       }, [activeTimer]);
 
+      // 關頁面 / 切換 App / 鎖螢幕前，立即把待寫的最後一筆存回雲端（手機尤其重要）
       useEffect(() => {
-        const handleBeforeUnload = (e) => {
-          if (tasks.length > 0 || notes.length > 0) {
-            e.preventDefault();
-            e.returnValue = '您的資料可能尚未匯出備份，確定要離開嗎？'; 
-          }
+        const onHide = () => { try { flushSaveRef.current(); } catch (e) {} };
+        const onVis = () => { if (document.hidden) onHide(); };
+        window.addEventListener('pagehide', onHide);
+        document.addEventListener('visibilitychange', onVis);
+        return () => {
+          window.removeEventListener('pagehide', onHide);
+          document.removeEventListener('visibilitychange', onVis);
         };
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-      }, [tasks, notes]);
+      }, []);
 
       const showDialog = (title, message, onConfirm, type = 'confirm') => {
         setDialog({ title, message, onConfirm, type, onCancel: () => setDialog(null) });
@@ -850,19 +901,6 @@
         const inProgressList = rangeFilteredTasks.filter(t => t.status !== 'done').sort((a,b) => b.timeInRange - a.timeInRange);
         const completedList = rangeFilteredTasks.filter(t => t.status === 'done').sort((a,b) => b.timeInRange - a.timeInRange);
 
-        const renderCustomizedLabelOuter = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index, name, fill }) => {
-          const RADIAN = Math.PI / 180;
-          const radius = outerRadius + 40; 
-          const x = cx + radius * Math.cos(-midAngle * RADIAN);
-          const y = cy + radius * Math.sin(-midAngle * RADIAN);
-          return (
-            <text x={x} y={y} fill={fill} textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="14" fontWeight="900">
-              <tspan x={x} dy="-0.6em">{name}</tspan>
-              <tspan x={x} dy="1.6em" fontSize="22">{`${(percent * 100).toFixed(0)}%`}</tspan>
-            </text>
-          );
-        };
-
         return (
           <div className="w-full space-y-6 pb-12 animate-in fade-in duration-300">
             <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-3xl border border-slate-200 shadow-sm w-full">
@@ -1156,9 +1194,19 @@
                   </h1>
                 </div>
                 <div className="flex items-center gap-3">
-                   <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-4 py-2 rounded-full text-sm font-bold border border-emerald-100 shadow-sm">
-                      <CheckCircle className="w-4 h-4" /> 已自動儲存
-                   </div>
+                   {syncStatus === 'saving' ? (
+                      <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-4 py-2 rounded-full text-sm font-bold border border-indigo-100 shadow-sm">
+                         <Clock className="w-4 h-4 animate-spin" /> 儲存中…
+                      </div>
+                   ) : syncStatus === 'error' ? (
+                      <div className="flex items-center gap-2 text-rose-600 bg-rose-50 px-4 py-2 rounded-full text-sm font-bold border border-rose-100 shadow-sm" title="與雲端同步失敗，請檢查網路連線">
+                         <Info className="w-4 h-4" /> 未同步 · 檢查網路
+                      </div>
+                   ) : (
+                      <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-4 py-2 rounded-full text-sm font-bold border border-emerald-100 shadow-sm">
+                         <CheckCircle className="w-4 h-4" /> 已同步雲端
+                      </div>
+                   )}
                 </div>
              </div>
 
@@ -1182,7 +1230,20 @@
       const [password, setPassword] = useState('');
       const [mode, setMode] = useState('login');
       const [err, setErr] = useState('');
+      const [msg, setMsg] = useState('');
       const [busy, setBusy] = useState(false);
+
+      const forgot = async () => {
+        setErr(''); setMsg('');
+        if (!email.trim()) { setErr('請先在上面填入你的電子郵件，再點忘記密碼'); return; }
+        setBusy(true);
+        try {
+          await sendPasswordResetEmail(fbAuth, email.trim());
+          setMsg('重設密碼的信已寄到 ' + email.trim() + '，請到信箱（含垃圾信匣）點連結重設。');
+        } catch (e2) {
+          setErr(e2.code === 'auth/invalid-email' ? '電子郵件格式不正確' : ('寄送失敗：' + (e2.code || e2.message)));
+        } finally { setBusy(false); }
+      };
 
       const submit = async (e) => {
         e.preventDefault();
@@ -1229,15 +1290,21 @@
                   className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 text-slate-700" placeholder="至少 6 個字" />
               </label>
               {err && <div className="text-sm text-rose-600 bg-rose-50 rounded-xl px-3 py-2 font-bold">{err}</div>}
+              {msg && <div className="text-sm text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 font-bold">{msg}</div>}
               <button type="submit" disabled={busy}
                 className="mt-2 w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-black transition-colors">
                 {busy ? '請稍候…' : (mode==='register' ? '建立帳號並登入' : '登入')}
               </button>
             </form>
-            <button onClick={()=>{setMode(mode==='register'?'login':'register'); setErr('');}}
-              className="mt-4 w-full text-sm text-indigo-600 font-bold hover:underline">
-              {mode==='register' ? '已經有帳號了？改為登入' : '第一次使用？建立我的帳號'}
-            </button>
+            <div className="mt-4 flex items-center justify-between">
+              <button onClick={()=>{setMode(mode==='register'?'login':'register'); setErr(''); setMsg('');}}
+                className="text-sm text-indigo-600 font-bold hover:underline">
+                {mode==='register' ? '已經有帳號了？改為登入' : '第一次使用？建立帳號'}
+              </button>
+              {mode==='login' && (
+                <button onClick={forgot} disabled={busy} className="text-sm text-slate-400 font-bold hover:text-indigo-600 hover:underline">忘記密碼？</button>
+              )}
+            </div>
             <p className="mt-4 text-[11px] leading-relaxed text-slate-400">
               資料儲存在你私人的雲端空間，只有登入後的你看得到；手機與電腦會即時同步。
             </p>
