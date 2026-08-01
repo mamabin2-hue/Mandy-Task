@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>TaskFlow 任務管理系統</title>
+  <title>Mandy-Task 任務管理系統</title>
   
   <!-- 載入 Tailwind CSS (網頁排版引擎) -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -14,7 +14,7 @@
     .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; border: 3px solid transparent; background-clip: content-box; }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
-    body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f8fafc; }
+    body { font-family: "Microsoft JhengHei", "微軟正黑體", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f8fafc; }
   </style>
 
   <!-- 設定 React 與相關套件的載入路徑 -->
@@ -24,7 +24,10 @@
         "react": "https://esm.sh/react@18.2.0",
         "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
         "lucide-react": "https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0",
-        "recharts": "https://esm.sh/recharts@2.10.3?deps=react@18.2.0,react-dom@18.2.0"
+        "recharts": "https://esm.sh/recharts@2.10.3?deps=react@18.2.0,react-dom@18.2.0",
+        "firebase/app": "https://esm.sh/firebase@10.12.2/app",
+        "firebase/auth": "https://esm.sh/firebase@10.12.2/auth",
+        "firebase/firestore": "https://esm.sh/firebase@10.12.2/firestore"
       }
     }
   </script>
@@ -47,6 +50,22 @@
       AlignLeft, Download, Upload, Info, X, Check, FileText 
     } from 'lucide-react';
     import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip } from 'recharts';
+    import { initializeApp } from 'firebase/app';
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updatePassword } from 'firebase/auth';
+    import { getFirestore, doc, onSnapshot, setDoc } from 'firebase/firestore';
+
+    // Firebase 連線設定（apiKey 為網頁版公開金鑰，安全由 Firestore 規則 + 登入控管）
+    const firebaseConfig = {
+      apiKey: "AIzaSyAV5rrga_uiGLK5xVgf2_K1EpqIegUzHfs",
+      authDomain: "mandy-task.firebaseapp.com",
+      projectId: "mandy-task",
+      storageBucket: "mandy-task.firebasestorage.app",
+      messagingSenderId: "58753516929",
+      appId: "1:58753516929:web:bd333c261ff65f991d9480"
+    };
+    const fbApp = initializeApp(firebaseConfig);
+    const fbAuth = getAuth(fbApp);
+    const fbDb = getFirestore(fbApp);
 
     // 系統預設資料
     // ⚠️ 此檔案會公開在 GitHub，請勿在此寫入真實人名或子公司名稱。
@@ -245,7 +264,7 @@
     });
     TaskCard.displayName = 'TaskCard';
 
-    function TaskManager() {
+    function TaskManager({ uid, userEmail }) {
       const [activeView, setActiveView] = useState('board');
       const [isSidebarOpen, setIsSidebarOpen] = useState(true);
       const [isLoaded, setIsLoaded] = useState(false);
@@ -280,62 +299,65 @@
       const [customEnd, setCustomEnd] = useState(() => toDateInput(new Date()));
       const [draggedNoteIndex, setDraggedNoteIndex] = useState(null);
       const fileInputRef = useRef(null);
+      // 雲端同步：記錄「最後一次與雲端一致的內容」，用來避免自己寫、自己又收到而形成迴圈
+      const syncedJsonRef = useRef(null);
+      const saveTimerRef = useRef(null);
 
-      // 初始化載入資料
-      // 首次使用（localStorage 完全空白）時，自動向本機伺服器索取預備資料，
-      // 使用者不必手動點「還原資料」。已有資料時絕不覆蓋。
+      // 雲端同步（讀）：訂閱這位使用者在 Firestore 的資料。
+      // 任何裝置（手機/電腦）的改動都會即時同步過來。
       useEffect(() => {
-        const bootstrapFromServer = async () => {
+        if (!uid) return;
+        const ref = doc(fbDb, 'users', uid, 'state', 'main');
+        const unsub = onSnapshot(ref, (snap) => {
           try {
-            const res = await fetch('seed', { cache: 'no-store' });
-            if (!res.ok) return false;
-            const d = await res.json();
-            if (d.catMap) localStorage.setItem('taskflow_catmap', JSON.stringify(d.catMap));
-            if (d.projects) setProjects(d.projects);
-            if (d.users) setUsers([...new Set([...DEFAULT_USERS, ...d.users])]);
-            if (d.notes) setNotes(d.notes);
-            if (d.tasks) setTasks(d.tasks.map(t => healTaskData(t)));
-            return true;
-          } catch (e) {
-            return false;   // 沒有預備檔或非本機執行，靜靜略過
-          }
-        };
-
-        const boot = async () => {
-          try {
-            const savedTasks = localStorage.getItem('taskflow_tasks');
-
-            if (savedTasks === null) {
-              await bootstrapFromServer();
+            if (snap.exists()) {
+              const d = snap.data() || {};
+              const payload = {
+                tasks: Array.isArray(d.tasks) ? d.tasks : [],
+                projects: Array.isArray(d.projects) && d.projects.length ? d.projects : DEFAULT_PROJECTS,
+                users: Array.isArray(d.users) ? d.users : [],
+                notes: Array.isArray(d.notes) ? d.notes : [],
+                catMap: d.catMap || {}
+              };
+              const incoming = JSON.stringify(payload);
+              if (incoming !== syncedJsonRef.current) {
+                syncedJsonRef.current = incoming;
+                localStorage.setItem('taskflow_catmap', JSON.stringify(payload.catMap));
+                setTasks(payload.tasks.map(t => healTaskData(t)));
+                setProjects(payload.projects);
+                setUsers([...new Set([...DEFAULT_USERS, ...payload.users])]);
+                setNotes(payload.notes);
+              }
             } else {
-              setTasks(JSON.parse(savedTasks).map(t => healTaskData(t)));
-
-              const savedProjects = localStorage.getItem('taskflow_projects');
-              if (savedProjects) setProjects(JSON.parse(savedProjects));
-
-              const savedUsers = localStorage.getItem('taskflow_users');
-              if (savedUsers) setUsers([...new Set([...DEFAULT_USERS, ...JSON.parse(savedUsers)])]);
-
-              const savedNotes = localStorage.getItem('taskflow_notes');
-              if (savedNotes) setNotes(JSON.parse(savedNotes));
+              // 這位使用者第一次登入、雲端尚無資料 → 用預設起步（存檔效果會自動建立文件）
+              syncedJsonRef.current = null;
             }
           } catch (e) {
-            console.error("Data Load Error:", e);
+            console.error("Sync load error:", e);
           }
           setIsLoaded(true);
-        };
+        }, (err) => {
+          console.error("Firestore onSnapshot error:", err);
+          setIsLoaded(true);
+        });
+        return () => unsub();
+      }, [uid]);
 
-        boot();
-      }, []);
-
-      // 資料變更時存檔
+      // 雲端同步（寫）：資料一變動就寫回雲端（去抖 800ms，避免每個字都寫一次）
       useEffect(() => {
-        if (!isLoaded) return;
-        localStorage.setItem('taskflow_tasks', JSON.stringify(tasks));
-        localStorage.setItem('taskflow_projects', JSON.stringify(projects));
-        localStorage.setItem('taskflow_users', JSON.stringify(users));
-        localStorage.setItem('taskflow_notes', JSON.stringify(notes));
-      }, [tasks, projects, users, notes, isLoaded]);
+        if (!isLoaded || !uid) return;
+        let catMap = {};
+        try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
+        const payload = { tasks, projects, users, notes, catMap };
+        const localJson = JSON.stringify(payload);
+        if (localJson === syncedJsonRef.current) return;   // 與雲端一致，不用寫
+        syncedJsonRef.current = localJson;
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(() => {
+          setDoc(doc(fbDb, 'users', uid, 'state', 'main'), { ...payload, updatedAt: Date.now() })
+            .catch(e => console.error("Sync save error:", e));
+        }, 800);
+      }, [tasks, projects, users, notes, isLoaded, uid]);
 
       useEffect(() => {
         let interval = null;
@@ -1079,6 +1101,11 @@
                <button onClick={handleExport} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="直接下載備份檔，無需確認"><Download className="w-3.5 h-3.5" /> 備份下載</button>
                <button onClick={() => fileInputRef.current.click()} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="上傳還原"><Upload className="w-3.5 h-3.5" /> 還原資料</button>
             </div>
+            <div className="px-4 pb-4 flex items-center justify-between gap-2 bg-slate-950/50">
+               <span className="text-[11px] text-slate-500 truncate" title={userEmail}>{userEmail}</span>
+               <button onClick={() => { if (confirm('確定要登出嗎？資料已存在雲端，下次登入還在。')) signOut(fbAuth); }}
+                 className="shrink-0 text-[11px] text-slate-400 hover:text-rose-400 font-black">登出</button>
+            </div>
           </div>
 
           <div className="flex-1 flex flex-col h-full overflow-hidden w-full relative bg-slate-50/50">
@@ -1118,9 +1145,89 @@
       );
     }
 
-    // 將 TaskManager 渲染到畫面上
+    // ── 登入畫面 ────────────────────────────────────────────
+    function LoginScreen() {
+      const [email, setEmail] = useState('');
+      const [password, setPassword] = useState('');
+      const [mode, setMode] = useState('login');
+      const [err, setErr] = useState('');
+      const [busy, setBusy] = useState(false);
+
+      const submit = async (e) => {
+        e.preventDefault();
+        setErr(''); setBusy(true);
+        try {
+          if (mode === 'register') {
+            if (password.length < 6) throw { code: 'auth/weak-password' };
+            await createUserWithEmailAndPassword(fbAuth, email.trim(), password);
+          } else {
+            await signInWithEmailAndPassword(fbAuth, email.trim(), password);
+          }
+        } catch (e2) {
+          const map = {
+            'auth/invalid-email': '電子郵件格式不正確',
+            'auth/missing-password': '請輸入密碼',
+            'auth/weak-password': '密碼至少要 6 個字',
+            'auth/email-already-in-use': '這個信箱已經註冊過了，請直接登入',
+            'auth/invalid-credential': '信箱或密碼錯誤',
+            'auth/user-not-found': '查無此帳號，請先建立帳號',
+            'auth/wrong-password': '密碼錯誤',
+            'auth/too-many-requests': '嘗試太多次，請稍後再試'
+          };
+          setErr(map[e2.code] || ('發生錯誤：' + (e2.code || e2.message || e2)));
+        } finally { setBusy(false); }
+      };
+
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-sky-50 to-indigo-100 p-4">
+          <div className="w-full max-w-sm bg-white rounded-3xl shadow-xl border border-slate-200 p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-11 h-11 rounded-2xl bg-indigo-600 flex items-center justify-center text-white font-black text-lg">M</div>
+              <div>
+                <div className="text-lg font-black text-slate-800">Mandy-Task</div>
+                <div className="text-xs text-slate-400">任務管理系統</div>
+              </div>
+            </div>
+            <form onSubmit={submit} className="flex flex-col gap-3">
+              <label className="text-sm font-bold text-slate-600">電子郵件
+                <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username"
+                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 text-slate-700" placeholder="you@example.com" />
+              </label>
+              <label className="text-sm font-bold text-slate-600">密碼
+                <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required autoComplete={mode==='register'?'new-password':'current-password'}
+                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 text-slate-700" placeholder="至少 6 個字" />
+              </label>
+              {err && <div className="text-sm text-rose-600 bg-rose-50 rounded-xl px-3 py-2 font-bold">{err}</div>}
+              <button type="submit" disabled={busy}
+                className="mt-2 w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-black transition-colors">
+                {busy ? '請稍候…' : (mode==='register' ? '建立帳號並登入' : '登入')}
+              </button>
+            </form>
+            <button onClick={()=>{setMode(mode==='register'?'login':'register'); setErr('');}}
+              className="mt-4 w-full text-sm text-indigo-600 font-bold hover:underline">
+              {mode==='register' ? '已經有帳號了？改為登入' : '第一次使用？建立我的帳號'}
+            </button>
+            <p className="mt-4 text-[11px] leading-relaxed text-slate-400">
+              資料儲存在你私人的雲端空間，只有登入後的你看得到；手機與電腦會即時同步。
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // ── 登入狀態守門 ─────────────────────────────────────────
+    function AuthGate() {
+      const [user, setUser] = useState(undefined); // undefined=檢查中, null=未登入
+      useEffect(() => onAuthStateChanged(fbAuth, u => setUser(u)), []);
+      if (user === undefined) {
+        return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold">載入中…</div>;
+      }
+      if (!user) return <LoginScreen />;
+      return <TaskManager uid={user.uid} userEmail={user.email} />;
+    }
+
     const root = createRoot(document.getElementById('root'));
-    root.render(<TaskManager />);
+    root.render(<AuthGate />);
   </script>
 </body>
 </html>
