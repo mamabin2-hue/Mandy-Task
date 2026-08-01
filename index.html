@@ -24,10 +24,9 @@
         "react": "https://esm.sh/react@18.2.0",
         "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
         "lucide-react": "https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0",
-        "recharts": "https://esm.sh/recharts@2.10.3?deps=react@18.2.0,react-dom@18.2.0",
-        "firebase/app": "https://esm.sh/firebase@10.12.2/app",
-        "firebase/auth": "https://esm.sh/firebase@10.12.2/auth",
-        "firebase/firestore": "https://esm.sh/firebase@10.12.2/firestore"
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js",
+        "firebase/firestore": "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"
       }
     }
   </script>
@@ -49,7 +48,6 @@
       Trash2, Edit2, Play, Square, CheckCircle, ChevronDown, PieChart as PieChartIcon, 
       AlignLeft, Download, Upload, Info, X, Check, FileText 
     } from 'lucide-react';
-    import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip } from 'recharts';
     import { initializeApp } from 'firebase/app';
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updatePassword } from 'firebase/auth';
     import { getFirestore, doc, onSnapshot, setDoc } from 'firebase/firestore';
@@ -263,6 +261,46 @@
       );
     });
     TaskCard.displayName = 'TaskCard';
+
+    // 純 SVG 圓環圖（取代 recharts，避免 CDN 相依問題）
+    const polarXY = (cx, cy, r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+    const SvgDonut = ({ data, onSliceClick }) => {
+      const size = 400, cx = 200, cy = 200, rOut = 112, rIn = 72;
+      const total = data.reduce((s, d) => s + (d.value || 0), 0);
+      if (!total) return null;
+      const gap = data.length > 1 ? 0.03 : 0;
+      let angle = -Math.PI / 2;
+      const segs = data.map((d) => {
+        const frac = (d.value || 0) / total;
+        const sweep = frac * Math.PI * 2;
+        const a0 = angle + gap / 2, a1 = angle + sweep - gap / 2;
+        angle += sweep;
+        const [ox0, oy0] = polarXY(cx, cy, rOut, a0);
+        const [ox1, oy1] = polarXY(cx, cy, rOut, a1);
+        const [ix1, iy1] = polarXY(cx, cy, rIn, a1);
+        const [ix0, iy0] = polarXY(cx, cy, rIn, a0);
+        const large = (a1 - a0) > Math.PI ? 1 : 0;
+        const path = `M ${ox0} ${oy0} A ${rOut} ${rOut} 0 ${large} 1 ${ox1} ${oy1} L ${ix1} ${iy1} A ${rIn} ${rIn} 0 ${large} 0 ${ix0} ${iy0} Z`;
+        const mid = (a0 + a1) / 2;
+        const [lx, ly] = polarXY(cx, cy, rOut + 34, mid);
+        return { d, path, lx, ly, pct: Math.round(frac * 100) };
+      });
+      return (
+        <svg viewBox="0 0 400 400" className="w-full h-full">
+          {segs.map((s, i) => (
+            <g key={i} onClick={() => onSliceClick && onSliceClick(s.d)} style={{ cursor: onSliceClick ? 'pointer' : 'default' }}>
+              <path d={s.path} fill={s.d.color}>
+                <title>{`${s.d.name}：${s.d.value} 分鐘 (${s.pct}%)`}</title>
+              </path>
+              <text x={s.lx} y={s.ly} fill={s.d.color} textAnchor={s.lx > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="14" fontWeight="900">
+                <tspan x={s.lx} dy="-0.6em">{s.d.name}</tspan>
+                <tspan x={s.lx} dy="1.6em" fontSize="22">{s.pct}%</tspan>
+              </text>
+            </g>
+          ))}
+        </svg>
+      );
+    };
 
     function TaskManager({ uid, userEmail }) {
       const [activeView, setActiveView] = useState('board');
@@ -869,14 +907,7 @@
                      <h3 className="text-lg font-black text-slate-700 flex items-center gap-2 mb-6 w-full"><PieChartIcon className="w-5 h-5 text-indigo-600" /> 分類時間佔比</h3>
                      <div className="w-full h-[450px]">
                         {categoryStats.length > 0 && totalTime > 0 ? (
-                           <ResponsiveContainer width="100%" height="100%">
-                             <RechartsPieChart>
-                               <Pie data={categoryStats} cx="50%" cy="50%" innerRadius="55%" outerRadius="75%" paddingAngle={4} dataKey="value" stroke="none" label={renderCustomizedLabelOuter} labelLine={true}>
-                                 {categoryStats.map((e, i) => <Cell key={`cell-${i}`} fill={e.color} />)}
-                               </Pie>
-                               <Tooltip formatter={(value) => `${value} 分鐘`} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }} />
-                             </RechartsPieChart>
-                           </ResponsiveContainer>
+                           <SvgDonut data={categoryStats} />
                         ) : <div className="w-full h-full flex items-center justify-center text-slate-500/50 font-bold border-2 border-dashed border-slate-400/20 rounded-2xl">所選區間無時間紀錄</div>}
                      </div>
                   </div>
