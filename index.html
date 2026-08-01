@@ -1,0 +1,1126 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TaskFlow 任務管理系統</title>
+  
+  <!-- 載入 Tailwind CSS (網頁排版引擎) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- 載入自訂捲軸樣式 -->
+  <style>
+    .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; border: 3px solid transparent; background-clip: content-box; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f8fafc; }
+  </style>
+
+  <!-- 設定 React 與相關套件的載入路徑 -->
+  <script type="importmap">
+    {
+      "imports": {
+        "react": "https://esm.sh/react@18.2.0",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "lucide-react": "https://esm.sh/lucide-react@0.292.0?deps=react@18.2.0",
+        "recharts": "https://esm.sh/recharts@2.10.3?deps=react@18.2.0,react-dom@18.2.0"
+      }
+    }
+  </script>
+  
+  <!-- 載入 Babel (瀏覽器端編譯引擎) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <!-- React 系統掛載點 -->
+  <div id="root"></div>
+
+  <!-- 系統核心程式碼 -->
+  <script type="text/babel" data-type="module">
+    import React, { useState, useEffect, useRef, useCallback } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { 
+      LayoutDashboard, List as ListIcon, PenSquare, MessageSquare, BarChart2, 
+      Settings, BookOpen, Plus, Search, Filter, Calendar, Clock, User, 
+      Trash2, Edit2, Play, Square, CheckCircle, ChevronDown, PieChart as PieChartIcon, 
+      AlignLeft, Download, Upload, Info, X, Check, FileText 
+    } from 'lucide-react';
+    import { ResponsiveContainer, PieChart as RechartsPieChart, Pie, Cell, Tooltip } from 'recharts';
+
+    // 系統預設資料
+    // ⚠️ 此檔案會公開在 GitHub，請勿在此寫入真實人名或子公司名稱。
+    //    實際的成員名單／專案分類請用「設定」頁新增，或匯入 seed.json（不上傳）。
+    const DEFAULT_PROJECTS = [
+      { id: 'p1', name: '工作分類一', color: '#8b5cf6' },
+      { id: 'p2', name: '工作分類二', color: '#d946ef' },
+      { id: 'p3', name: '工作分類三', color: '#06b6d4' },
+      { id: 'p4', name: '會議/報告', color: '#3b82f6' },
+      { id: 'p5', name: '專案企劃與執行', color: '#10b981' }
+    ];
+    const DEFAULT_USERS = [];
+
+    // 舊資料 subCategoryId → 分類名稱的對照表。
+    // 內建僅保留不敏感的通用鍵值；完整對照表由 seed.json 匯入後存進 localStorage。
+    const BUILTIN_CAT_MAP = {
+      'hr': '工作分類一', 'meeting': '會議/報告',
+      'project': '專案企劃與執行', 'admin': '工作分類三'
+    };
+    const getCatMap = () => {
+      try {
+        const saved = localStorage.getItem('taskflow_catmap');
+        return saved ? { ...BUILTIN_CAT_MAP, ...JSON.parse(saved) } : BUILTIN_CAT_MAP;
+      } catch (e) { return BUILTIN_CAT_MAP; }
+    };
+
+    // 資料相容與修復引擎
+    const healTaskData = (task) => {
+      const text = task.text || task.title || task.name || '';
+      let status = task.status;
+      if (status === 'doing') status = 'in-progress';
+      if (!status) status = 'todo';
+      
+      let assignee = task.assignee;
+      if (!assignee || assignee === 'none') {
+          assignee = (task.reportTo && task.reportTo !== 'none') ? task.reportTo : '';
+      }
+      if (assignee === '- 尚未設定 -') assignee = '';
+
+      let period = task.period;
+      if (!period) {
+          const timeMap = { 'morning': '上午', 'afternoon': '下午', 'evening': '晚上/下班', 'none': '不指定時段' };
+          period = timeMap[task.timeBlock] || task.timeBlock || '不指定時段';
+      }
+
+      let category = task.category;
+      if (!category && task.subCategoryId) {
+          category = getCatMap()[task.subCategoryId] || task.subCategoryId;
+      }
+      if(!category) category = '';
+
+      let logs = task.logs || [];
+      if (logs.length === 0 && task.workLogs && Array.isArray(task.workLogs)) {
+          logs = task.workLogs.map(wl => ({
+              id: wl.id || Date.now().toString() + Math.random().toString(),
+              start: wl.date || new Date().toISOString(),
+              end: wl.date || new Date().toISOString(),
+              duration: isNaN(Number(wl.duration)) ? (isNaN(Number(wl.spent)) ? 0 : Number(wl.spent)) : Number(wl.duration),
+              manual: true
+          }));
+      }
+      logs = logs.map(l => ({ ...l, duration: isNaN(Number(l.duration)) ? 0 : Number(l.duration) }));
+
+      let timeSpent = logs.reduce((acc, log) => acc + log.duration, 0);
+      if (timeSpent === 0 && task.timeSpent) {
+          timeSpent = isNaN(Number(task.timeSpent)) ? 0 : Number(task.timeSpent);
+      }
+
+      return { ...task, id: task.id || Date.now().toString(), text, status, assignee, period, category, logs, timeSpent, createdAt: task.createdAt || new Date().toISOString(), deadline: task.deadline || '' };
+    };
+
+    // 任務卡片元件
+    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog }) => {
+      const isRunning = activeTimer === task.id;
+      const projectInfo = projects.find(p => p.name === task.category);
+      const projectColor = projectInfo?.color || '#cbd5e1';
+      
+      const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
+      const [manualMins, setManualMins] = useState('');
+
+      const titleRef = useRef(null);
+      const noteRef = useRef(null);
+
+      const stopDrag = (e) => { e.stopPropagation(); };
+      const stopDragAndDrop = (e) => { e.stopPropagation(); e.preventDefault(); };
+
+      const adjustHeight = (el) => {
+        if (el) {
+          el.style.height = 'auto';
+          el.style.height = el.scrollHeight + 'px';
+        }
+      };
+
+      useEffect(() => { adjustHeight(titleRef.current); }, [task.text]);
+      useEffect(() => { adjustHeight(noteRef.current); }, [task.note]);
+
+      return (
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col group transition-all hover:shadow-md w-full relative mb-4 overflow-visible" style={{ borderTopWidth: '6px', borderTopColor: projectColor }}>
+          <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/80 rounded-t-xl">
+             <div className="flex flex-wrap items-center gap-2 flex-1 pr-2">
+               <div className="relative group/sel">
+                 <select className="appearance-none bg-white border border-slate-200 text-xs font-black py-1.5 pl-3 pr-7 rounded-full shadow-sm outline-none cursor-pointer hover:border-slate-300 transition-colors max-w-[160px] truncate" style={{ color: projectColor }} value={task.category || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onChange={(e) => updateTask(task.id, 'category', e.target.value)}>
+                   <option value="">- 變更專案 -</option>
+                   {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                 </select>
+                 <ChevronDown className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" style={{ color: projectColor }} />
+               </div>
+               
+               <div className="relative group/sel">
+                 <select className="appearance-none bg-white border border-slate-200 text-slate-500 text-xs font-bold py-1.5 pl-3 pr-7 rounded-full shadow-sm outline-none cursor-pointer hover:border-slate-300 transition-colors" value={task.period || '不指定時段'} onClick={stopDrag} onDragStart={stopDragAndDrop} onChange={(e) => updateTask(task.id, 'period', e.target.value)}>
+                   <option value="不指定時段">不指定時段</option><option value="上午">上午</option><option value="下午">下午</option><option value="晚上/下班">晚上/下班</option>
+                 </select>
+                 <ChevronDown className="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+               </div>
+             </div>
+             <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} onDragStart={stopDragAndDrop} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0">
+                <Trash2 className="w-4 h-4" />
+             </button>
+          </div>
+
+          <div className="p-4 flex flex-col gap-3">
+            <textarea ref={titleRef} className="w-full text-base font-black text-slate-800 bg-transparent border-none outline-none resize-none placeholder-slate-300 overflow-hidden" style={{ minHeight: '32px' }} value={task.text || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target)} onChange={(e) => updateTask(task.id, 'text', e.target.value)} placeholder="輸入任務名稱..." />
+
+            <div className="flex flex-col gap-0 border border-purple-100 rounded-xl overflow-hidden bg-purple-50/20">
+               <div className="flex items-center justify-between w-full p-2 bg-purple-50 border-b border-purple-100">
+                 <div className="flex items-center gap-1.5 text-purple-600 text-xs font-black px-2"><User className="w-3.5 h-3.5" /> 匯報對象</div>
+                 <div className="relative flex-1 max-w-[140px]">
+                   <select className="w-full appearance-none bg-white border border-purple-200 text-purple-700 text-xs font-bold py-1 pl-3 pr-7 rounded-lg outline-none cursor-pointer hover:border-purple-300 transition-colors" value={task.assignee || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onChange={(e) => updateTask(task.id, 'assignee', e.target.value)}>
+                     <option value="">- 尚未設定 -</option><option value="All">All (所有主管)</option>
+                     {users.map(u => <option key={u} value={u}>{u}</option>)}
+                   </select>
+                   <ChevronDown className="w-3 h-3 text-purple-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                 </div>
+               </div>
+               <textarea ref={noteRef} className="w-full text-sm font-bold text-slate-600 bg-yellow-50/80 p-3 outline-none resize-none placeholder-slate-400 focus:bg-yellow-100/50 transition-colors overflow-hidden leading-relaxed" style={{ minHeight: '60px' }} value={task.note || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target)} onChange={(e) => updateTask(task.id, 'note', e.target.value)} placeholder="點此直接輸入備註、交辦事項..." />
+            </div>
+
+            <div className="mt-2 flex flex-col gap-2 pt-3 border-t border-slate-100">
+              <div className="text-xs font-bold text-slate-400 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> 投入歷程與補登</div>
+              <div className="flex items-center gap-2 w-full">
+                 <input type="date" className="flex-1 bg-slate-50 border border-slate-200 text-slate-600 text-xs font-bold px-2 py-1.5 rounded-lg outline-none cursor-pointer" value={manualDate} onChange={e => setManualDate(e.target.value)} onClick={stopDrag} onDragStart={stopDragAndDrop} />
+                 <input type="number" placeholder="分鐘" className="w-[60px] bg-slate-50 border border-slate-200 text-slate-600 text-xs font-bold px-2 py-1.5 rounded-lg outline-none" value={manualMins} onChange={e => setManualMins(e.target.value)} onClick={stopDrag} onDragStart={stopDragAndDrop} />
+                 <button onClick={(e) => { e.stopPropagation(); addManualLog(task.id, manualDate, manualMins); setManualMins(''); }} onDragStart={stopDragAndDrop} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors shrink-0 shadow-sm">+ 補登</button>
+              </div>
+
+              <div className="flex flex-col gap-1 mt-1 max-h-[140px] overflow-y-auto custom-scrollbar pr-1">
+                 {task.logs && task.logs.map((log, idx) => {
+                   const isCurrent = isRunning && !log.end && idx === task.logs.length - 1;
+                   const rawDur = isCurrent ? Math.max(1, Math.floor((new Date() - new Date(log.start))/60000)) : Number(log.duration);
+                   const dur = isNaN(rawDur) ? 0 : rawDur;
+                   if (dur === 0 && !isCurrent) return null; 
+                   const dateObj = new Date(log.start);
+                   const dateLabel = isNaN(dateObj) ? '未知時間' : dateObj.toLocaleString('zh-TW', { month:'numeric', day:'numeric', hour:'numeric', minute:'2-digit' });
+                   return (
+                     <div key={log.id || idx} className={`text-[11px] font-bold px-2 py-1.5 rounded-lg flex justify-between items-center group/log ${isCurrent ? 'bg-indigo-50 text-indigo-700 border border-indigo-100 animate-pulse' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 transition-colors'}`}>
+                       <span className="truncate">{dateLabel} {log.manual ? '(補)' : ''}</span>
+                       <div className="flex items-center gap-2">
+                         <span className={isCurrent ? 'text-indigo-600 font-black' : 'text-indigo-500'}>+{dur}m</span>
+                         {!isCurrent && (
+                            <button onClick={(e) => { e.stopPropagation(); deleteLog(task.id, log.id); }} onDragStart={stopDragAndDrop} className="w-5 h-5 rounded-full text-slate-400 opacity-0 group-hover/log:opacity-100 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-all" title="刪除此紀錄"><Trash2 className="w-3 h-3" /></button>
+                         )}
+                       </div>
+                     </div>
+                   )
+                 })}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-3 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between gap-3 rounded-b-xl">
+             {task.status === 'done' ? (
+                <div className="flex items-center gap-1.5 text-emerald-600 font-black text-sm px-3 py-2 bg-emerald-100/50 rounded-xl flex-1 justify-center border border-emerald-100 cursor-pointer hover:bg-emerald-200/50 transition-colors shadow-sm" onClick={(e)=>{ e.stopPropagation(); toggleStatus(task.id, 'todo'); }} title="點擊退回待辦">
+                  <CheckCircle className="w-4 h-4" /> 已完成結案
+                </div>
+             ) : (
+                <button onClick={(e) => { e.stopPropagation(); toggleTimer(task.id); }} onDragStart={stopDragAndDrop} className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl font-black text-sm transition-all shadow-sm ${isRunning ? 'bg-indigo-600 text-white shadow-indigo-200' : 'bg-white text-indigo-600 border border-indigo-200 hover:bg-indigo-50'}`}>
+                  {isRunning ? <><Square className="w-4 h-4 fill-current" /> 暫停</> : <><Play className="w-4 h-4 fill-current" /> 開始</>}
+                </button>
+             )}
+             
+             {!task.status.includes('done') && (
+               <div className="flex items-center gap-2 shrink-0">
+                 <div className="flex items-center gap-1.5 text-slate-500 bg-white px-2 py-1.5 rounded-lg border border-slate-200 font-bold text-xs shadow-sm group/date relative">
+                   <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                   <input type="date" className="bg-transparent outline-none w-[105px] cursor-pointer" value={task.deadline || ''} onChange={(e) => updateTask(task.id, 'deadline', e.target.value)} onClick={stopDrag} onDragStart={stopDragAndDrop} />
+                 </div>
+                 <div className="flex items-center gap-1 text-indigo-700 bg-indigo-50 px-2.5 py-1.5 rounded-lg font-black text-sm border border-indigo-100 shadow-sm justify-center min-w-[60px]" title="系統自動計算總時數">
+                   <Clock className="w-3.5 h-3.5 opacity-70" />
+                   {isNaN(Number(task.timeSpent)) ? 0 : task.timeSpent} <span className="text-[10px] font-bold">m</span>
+                 </div>
+               </div>
+             )}
+          </div>
+        </div>
+      );
+    });
+    TaskCard.displayName = 'TaskCard';
+
+    function TaskManager() {
+      const [activeView, setActiveView] = useState('board');
+      const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+      const [isLoaded, setIsLoaded] = useState(false);
+      
+      const [tasks, setTasks] = useState([]);
+      const [projects, setProjects] = useState(DEFAULT_PROJECTS);
+      const [users, setUsers] = useState(DEFAULT_USERS);
+      const [notes, setNotes] = useState([]);
+
+      const [dialog, setDialog] = useState(null); 
+      const [filterType, setFilterType] = useState('all'); 
+      const [filterProject, setFilterProject] = useState('ALL'); 
+      
+      const [newTaskInput, setNewTaskInput] = useState('');
+      const [newTaskType, setNewTaskType] = useState('work'); 
+      const [newTaskProject, setNewTaskProject] = useState('ALL');
+      const [newTaskPeriod, setNewTaskPeriod] = useState('不指定時段');
+      const [newTaskDeadline, setNewTaskDeadline] = useState('');
+
+      const [activeTimer, setActiveTimer] = useState(null);
+      const [timerTick, setTimerTick] = useState(0);
+
+      const [settingsNewUser, setSettingsNewUser] = useState('');
+      const [settingsNewProject, setSettingsNewProject] = useState('');
+      const [editingProject, setEditingProject] = useState(null);
+      const [editingProjectName, setEditingProjectName] = useState('');
+
+      const [statsRange, setStatsRange] = useState('thisWeek');
+      // 自訂查詢期間（YYYY-MM-DD），預設為今天
+      const toDateInput = (d) => d.toLocaleDateString('sv-SE');   // sv-SE 會給出 YYYY-MM-DD 且用當地時間
+      const [customStart, setCustomStart] = useState(() => toDateInput(new Date()));
+      const [customEnd, setCustomEnd] = useState(() => toDateInput(new Date()));
+      const [draggedNoteIndex, setDraggedNoteIndex] = useState(null);
+      const fileInputRef = useRef(null);
+
+      // 初始化載入資料
+      // 首次使用（localStorage 完全空白）時，自動向本機伺服器索取預備資料，
+      // 使用者不必手動點「還原資料」。已有資料時絕不覆蓋。
+      useEffect(() => {
+        const bootstrapFromServer = async () => {
+          try {
+            const res = await fetch('seed', { cache: 'no-store' });
+            if (!res.ok) return false;
+            const d = await res.json();
+            if (d.catMap) localStorage.setItem('taskflow_catmap', JSON.stringify(d.catMap));
+            if (d.projects) setProjects(d.projects);
+            if (d.users) setUsers([...new Set([...DEFAULT_USERS, ...d.users])]);
+            if (d.notes) setNotes(d.notes);
+            if (d.tasks) setTasks(d.tasks.map(t => healTaskData(t)));
+            return true;
+          } catch (e) {
+            return false;   // 沒有預備檔或非本機執行，靜靜略過
+          }
+        };
+
+        const boot = async () => {
+          try {
+            const savedTasks = localStorage.getItem('taskflow_tasks');
+
+            if (savedTasks === null) {
+              await bootstrapFromServer();
+            } else {
+              setTasks(JSON.parse(savedTasks).map(t => healTaskData(t)));
+
+              const savedProjects = localStorage.getItem('taskflow_projects');
+              if (savedProjects) setProjects(JSON.parse(savedProjects));
+
+              const savedUsers = localStorage.getItem('taskflow_users');
+              if (savedUsers) setUsers([...new Set([...DEFAULT_USERS, ...JSON.parse(savedUsers)])]);
+
+              const savedNotes = localStorage.getItem('taskflow_notes');
+              if (savedNotes) setNotes(JSON.parse(savedNotes));
+            }
+          } catch (e) {
+            console.error("Data Load Error:", e);
+          }
+          setIsLoaded(true);
+        };
+
+        boot();
+      }, []);
+
+      // 資料變更時存檔
+      useEffect(() => {
+        if (!isLoaded) return;
+        localStorage.setItem('taskflow_tasks', JSON.stringify(tasks));
+        localStorage.setItem('taskflow_projects', JSON.stringify(projects));
+        localStorage.setItem('taskflow_users', JSON.stringify(users));
+        localStorage.setItem('taskflow_notes', JSON.stringify(notes));
+      }, [tasks, projects, users, notes, isLoaded]);
+
+      useEffect(() => {
+        let interval = null;
+        if (activeTimer) interval = setInterval(() => setTimerTick(prev => prev + 1), 60000);
+        return () => clearInterval(interval);
+      }, [activeTimer]);
+
+      useEffect(() => {
+        const handleBeforeUnload = (e) => {
+          if (tasks.length > 0 || notes.length > 0) {
+            e.preventDefault();
+            e.returnValue = '您的資料可能尚未匯出備份，確定要離開嗎？'; 
+          }
+        };
+        window.addEventListener('beforeunload', handleBeforeUnload);
+        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+      }, [tasks, notes]);
+
+      const showDialog = (title, message, onConfirm, type = 'confirm') => {
+        setDialog({ title, message, onConfirm, type, onCancel: () => setDialog(null) });
+      };
+      const closeDialog = () => setDialog(null);
+
+      const addTask = (e) => {
+        if (e.key === 'Enter' && newTaskInput.trim()) {
+          const projToSave = newTaskType === 'work' ? (newTaskProject === 'ALL' ? '' : newTaskProject) : '';
+          const newTask = {
+            id: Date.now().toString(), text: newTaskInput.trim(), type: newTaskType,
+            category: projToSave, period: newTaskPeriod, deadline: newTaskDeadline,
+            status: 'todo', timeSpent: 0, logs: [], assignee: '', note: '',
+            createdAt: new Date().toISOString()
+          };
+          setTasks([newTask, ...tasks]);
+          setNewTaskInput('');
+        }
+      };
+
+      const updateTask = useCallback((taskId, field, value) => {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, [field]: value } : t));
+      }, []);
+
+      const deleteTask = useCallback((taskId) => {
+        showDialog('刪除任務', '確定要永久刪除此任務嗎？此動作無法復原。', () => {
+          setTasks(prev => prev.filter(t => t.id !== taskId));
+          if(activeTimer === taskId) setActiveTimer(null);
+          closeDialog();
+        }, 'danger');
+      }, [activeTimer]);
+
+      const toggleStatus = useCallback((taskId, targetStatus) => {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: targetStatus } : t));
+      }, []);
+
+      const toggleTimer = useCallback((taskId) => {
+        setTasks(prev => {
+          let currentTasks = [...prev];
+          if (activeTimer) {
+             currentTasks = currentTasks.map(t => {
+                if (t.id === activeTimer) {
+                  const lastLog = t.logs[t.logs.length - 1];
+                  if (lastLog && !lastLog.end) {
+                    const now = new Date();
+                    const durationMins = Math.max(1, Math.floor((now - new Date(lastLog.start)) / 60000));
+                    const updatedLogs = [...t.logs];
+                    updatedLogs[updatedLogs.length - 1] = { ...lastLog, end: now.toISOString(), duration: durationMins };
+                    const total = updatedLogs.reduce((acc, log) => acc + (isNaN(Number(log.duration)) ? 0 : Number(log.duration)), 0);
+                    return { ...t, status: t.status === 'todo' ? 'in-progress' : t.status, logs: updatedLogs, timeSpent: total };
+                  }
+                }
+                return t;
+             });
+          }
+          if (activeTimer !== taskId) {
+            currentTasks = currentTasks.map(t => {
+              if (t.id === taskId) {
+                const newLog = { id: Date.now().toString(), start: new Date().toISOString(), end: null, duration: 0, manual: false };
+                return { ...t, status: t.status === 'todo' ? 'in-progress' : t.status, logs: [...(t.logs || []), newLog] };
+              }
+              return t;
+            });
+            setActiveTimer(taskId);
+            setTimerTick(0);
+          } else {
+            setActiveTimer(null);
+          }
+          return currentTasks;
+        });
+      }, [activeTimer]);
+
+      const addManualLog = useCallback((taskId, dateStr, durationStr) => {
+        const mins = parseInt(durationStr, 10);
+        if (isNaN(mins) || mins <= 0) return;
+        const logDate = new Date(dateStr);
+        const now = new Date();
+        logDate.setHours(now.getHours(), now.getMinutes());
+        setTasks(prev => prev.map(t => {
+          if (t.id === taskId) {
+            const newLog = { id: Date.now().toString(), start: logDate.toISOString(), end: logDate.toISOString(), duration: mins, manual: true };
+            const updatedLogs = [...(t.logs || []), newLog];
+            const total = updatedLogs.reduce((acc, log) => acc + (isNaN(Number(log.duration)) ? 0 : Number(log.duration)), 0);
+            return { ...t, logs: updatedLogs, timeSpent: total };
+          }
+          return t;
+        }));
+      }, []);
+
+      const deleteLog = useCallback((taskId, logId) => {
+        setTasks(prev => prev.map(t => {
+          if (t.id === taskId) {
+            const updatedLogs = (t.logs || []).filter(l => l.id !== logId);
+            const total = updatedLogs.reduce((acc, log) => acc + (isNaN(Number(log.duration)) ? 0 : Number(log.duration)), 0);
+            return { ...t, logs: updatedLogs, timeSpent: total };
+          }
+          return t;
+        }));
+      }, []);
+
+      const handleExport = () => {
+        let catMap = {};
+        try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
+        const data = { tasks, projects, users, notes, catMap };
+        const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `TaskFlow_Backup_${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+
+      const handleImport = (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            // 先寫入分類對照表，healTaskData 還原舊資料時才吃得到
+            if(data.catMap) localStorage.setItem('taskflow_catmap', JSON.stringify(data.catMap));
+            if(data.projects) setProjects(data.projects);
+            else if (data.workCategories) {
+                const mappedProjects = Object.entries(data.workCategories).map(([k, v], index) => {
+                    const colors = ['#f43f5e', '#f97316', '#eab308', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef'];
+                    return { id: k, name: v.label || k, color: colors[index % colors.length] };
+                });
+                setProjects(mappedProjects);
+            }
+            if(data.tasks) setTasks(data.tasks.map(t => healTaskData(t)));
+            if(data.users) setUsers([...new Set([...DEFAULT_USERS, ...data.users])]);
+            else if (data.managers) setUsers([...new Set([...DEFAULT_USERS, ...data.managers])]);
+            if(data.notes) setNotes(data.notes);
+          } catch(error) {
+            alert('還原失敗，檔案格式可能錯誤: ' + error.message);
+          }
+          e.target.value = ''; 
+        };
+        reader.readAsText(file);
+      };
+
+      if (!isLoaded) return null;
+
+      const renderBoard = () => {
+        let filtered = tasks;
+        if (filterType === 'uncat') filtered = filtered.filter(t => t.type === 'uncat' || !t.category);
+        if (filterType === 'work') {
+            filtered = filtered.filter(t => t.type === 'work' || t.category);
+            if (filterProject !== 'ALL') filtered = filtered.filter(t => t.category === filterProject);
+        }
+        if (filterType === 'life') filtered = filtered.filter(t => t.type === 'life');
+
+        const now = new Date();
+        filtered = filtered.filter(t => {
+           if (t.status === 'done') {
+              let lastTime = new Date(t.createdAt);
+              if (t.logs && t.logs.length > 0 && t.logs[t.logs.length - 1].end) lastTime = new Date(t.logs[t.logs.length - 1].end);
+              return ((now - lastTime) / (1000 * 60 * 60 * 24)) <= 7;
+           }
+           return true;
+        });
+
+        return (
+          <div className="flex flex-col w-full h-full animate-in fade-in duration-300">
+            <div className="bg-white p-5 rounded-3xl border border-slate-200 shadow-sm mb-6 sticky top-0 z-20 w-full flex flex-col gap-4">
+              <div className="flex relative">
+                <input type="text" className="w-full bg-slate-50 text-slate-800 text-lg font-bold px-6 py-4 rounded-2xl outline-none focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all border border-slate-200 shadow-inner" placeholder="+ 把大腦清空！想到什麼就寫下來... (按 Enter 快速新增)" value={newTaskInput} onChange={(e) => setNewTaskInput(e.target.value)} onKeyDown={addTask} />
+                <button onClick={() => addTask({key: 'Enter'})} className="absolute right-3 top-1/2 -translate-y-1/2 bg-indigo-600 hover:bg-indigo-700 text-white font-black px-6 py-2.5 rounded-xl transition-colors shadow-sm">記錄</button>
+              </div>
+              <div className="flex flex-wrap items-center gap-4 w-full px-2">
+                 <div className="flex items-center gap-2 shrink-0">
+                   <span className="text-sm font-black text-indigo-600 bg-indigo-50 px-3 py-1.5 rounded-lg border border-indigo-100 shadow-sm">建立並檢視 ➔</span>
+                   <div className="flex bg-slate-100 p-1 rounded-xl">
+                      <button onClick={() => {setNewTaskType('uncat'); setFilterType('uncat');}} className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${newTaskType==='uncat'?'bg-white text-slate-800 shadow-sm':'text-slate-500 hover:text-slate-700'}`}>未分類</button>
+                      <button onClick={() => {setNewTaskType('work'); setFilterType('work'); setFilterProject('ALL');}} className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${newTaskType==='work'?'bg-white text-indigo-700 shadow-sm':'text-slate-500 hover:text-slate-700'}`}>工作專案</button>
+                      <button onClick={() => {setNewTaskType('life'); setFilterType('life');}} className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-bold transition-all ${newTaskType==='life'?'bg-white text-emerald-700 shadow-sm':'text-slate-500 hover:text-slate-700'}`}>生活個人</button>
+                   </div>
+                 </div>
+                 {newTaskType === 'work' && (
+                   <select className="bg-white border border-slate-200 text-slate-700 text-sm font-bold px-4 py-2 rounded-xl outline-none shadow-sm cursor-pointer min-w-[150px]" value={newTaskProject} onChange={(e) => {setNewTaskProject(e.target.value); setFilterProject(e.target.value);}}>
+                     <option value="ALL">所有工作專案 (ALL)</option>
+                     {projects.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
+                   </select>
+                 )}
+                 <div className="h-6 w-px bg-slate-300 hidden md:block"></div>
+                 <div className="flex items-center gap-3">
+                   <Clock className="w-4 h-4 text-slate-400" />
+                   <select className="bg-white border border-slate-200 text-slate-700 text-sm font-bold px-4 py-2 rounded-xl outline-none shadow-sm cursor-pointer" value={newTaskPeriod} onChange={(e) => setNewTaskPeriod(e.target.value)}>
+                     <option value="不指定時段">不指定時段</option><option value="上午">上午</option><option value="下午">下午</option><option value="晚上/下班">晚上/下班</option>
+                   </select>
+                 </div>
+                 <div className="flex items-center gap-2 bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm ml-auto shrink-0">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                    <input type="date" className="text-sm font-bold text-slate-600 bg-transparent outline-none cursor-pointer" value={newTaskDeadline} onChange={(e) => setNewTaskDeadline(e.target.value)} />
+                 </div>
+              </div>
+            </div>
+            <div className="flex flex-col lg:flex-row gap-6 items-start w-full pb-10">
+              {[
+                { id: 'todo', title: '待辦', icon: Square, data: filtered.filter(t=>t.status==='todo'), bg: 'bg-slate-50/80 border-slate-200', text: 'text-slate-700', iconColor: 'text-slate-400' },
+                { id: 'in-progress', title: '進行中', icon: Play, data: filtered.filter(t=>t.status==='in-progress'), bg: 'bg-indigo-50/50 border-indigo-100', text: 'text-indigo-800', iconColor: 'text-indigo-500 fill-current' },
+                { id: 'done', title: '已完成', icon: CheckCircle, data: filtered.filter(t=>t.status==='done'), bg: 'bg-emerald-50/50 border-emerald-100 opacity-90', text: 'text-emerald-800', iconColor: 'text-emerald-500' }
+              ].map(col => (
+                <div key={col.id} className={`flex-1 w-full flex flex-col gap-4 p-4 rounded-3xl border ${col.bg}`} onDragOver={e=>e.preventDefault()} onDrop={(e)=>{ const taskId = e.dataTransfer.getData('taskId'); if(taskId) toggleStatus(taskId, col.id); }}>
+                  <div className="flex items-center justify-between px-2">
+                    <h3 className={`text-lg font-black ${col.text} flex items-center gap-2`}><col.icon className={`w-5 h-5 ${col.iconColor}`} /> {col.title}</h3>
+                    <span className="bg-white text-slate-500 text-sm font-black px-3 py-1 rounded-full shadow-sm border border-slate-200">{col.data.length}</span>
+                  </div>
+                  <div className="flex flex-col gap-0 min-h-[200px]">
+                     {col.data.map(task => (
+                        <div key={task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)}>
+                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} />
+                        </div>
+                     ))}
+                     {col.data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">無任務或拖曳至此</div>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      };
+
+      const renderNotes = () => {
+        const noteColors = ['bg-pink-100/70', 'bg-yellow-100/70', 'bg-blue-100/70', 'bg-emerald-100/70', 'bg-purple-100/70'];
+        return (
+          <div className="w-full space-y-6 animate-in fade-in duration-300 pb-10">
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-4">
+               <div className="flex flex-col gap-3 bg-yellow-50/50 p-4 rounded-2xl border border-yellow-200/70">
+                  <div className="flex items-center gap-2 mb-2 text-yellow-600 font-black"><PenSquare className="w-5 h-5" /> 隨手筆記 & 交辦區</div>
+                  <textarea className="w-full bg-transparent text-slate-800 text-lg font-bold outline-none resize-none placeholder-slate-400 min-h-[100px]" placeholder="隨手記下事情... (可以選擇顏色與相關人員)" id="newNoteInput" />
+                  <div className="flex items-center justify-between border-t border-yellow-200/60 pt-3">
+                     <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                           <span className="text-xs font-bold text-slate-500">緊急程度:</span>
+                           <div className="flex gap-1.5" id="noteColorPicker">
+                              {noteColors.map((c, i) => (
+                                 <div key={c} className={`w-5 h-5 rounded-full cursor-pointer hover:scale-110 transition-transform ${c} border-2 border-white shadow-sm ring-1 ring-slate-200 ${i===1?'ring-offset-2 ring-indigo-500':''}`} onClick={(e) => {
+                                    document.querySelectorAll('#noteColorPicker > div').forEach(el=>el.classList.remove('ring-offset-2', 'ring-indigo-500'));
+                                    e.target.classList.add('ring-offset-2', 'ring-indigo-500');
+                                    e.target.dataset.color = c;
+                                 }} data-color={c}></div>
+                              ))}
+                           </div>
+                        </div>
+                        <div className="w-px h-4 bg-slate-300"></div>
+                        <div className="flex items-center gap-2">
+                           <span className="text-xs font-bold text-slate-500">@ 相關人員:</span>
+                           <select id="noteUserSelect" className="bg-white border border-slate-200 text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
+                              <option value="">- 無 -</option>{users.map(u=><option key={u} value={u}>{u}</option>)}
+                           </select>
+                        </div>
+                     </div>
+                     <button onClick={() => {
+                        const text = document.getElementById('newNoteInput').value.trim();
+                        if(text){
+                           const colorEl = document.querySelector('#noteColorPicker > div.ring-indigo-500');
+                           const color = colorEl ? colorEl.dataset.color : 'bg-yellow-100/70';
+                           const tag = document.getElementById('noteUserSelect').value;
+                           setNotes([{id: Date.now().toString(), text, color, tag, createdAt: new Date().toISOString()}, ...notes]);
+                           document.getElementById('newNoteInput').value = '';
+                        }
+                     }} className="bg-slate-800 hover:bg-slate-900 text-white font-black px-6 py-2 rounded-xl transition-colors shadow-sm text-sm">貼上便利貼</button>
+                  </div>
+               </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+               {notes.map((note, index) => (
+                  <div key={note.id} draggable onDragStart={(e) => { setDraggedNoteIndex(index); e.dataTransfer.effectAllowed = "move"; }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
+                           e.preventDefault();
+                           if (draggedNoteIndex === null || draggedNoteIndex === index) return;
+                           const newNotes = [...notes];
+                           const draggedItem = newNotes[draggedNoteIndex];
+                           newNotes.splice(draggedNoteIndex, 1);
+                           newNotes.splice(index, 0, draggedItem);
+                           setNotes(newNotes);
+                           setDraggedNoteIndex(null);
+                       }}
+                       className={`p-6 rounded-3xl shadow-sm hover:shadow-md transition-all relative group flex flex-col gap-4 cursor-grab active:cursor-grabbing border border-black/5 ${note.color || 'bg-yellow-100/70'}`}>
+                     <textarea className="w-full flex-1 bg-transparent resize-none outline-none font-bold text-slate-800 overflow-hidden leading-relaxed" style={{ minHeight: '120px' }} value={note.text} onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onChange={e => setNotes(notes.map(n => n.id === note.id ? {...n, text: e.target.value} : n))} />
+                     <div className="flex items-center justify-between mt-auto pt-4 border-t border-black/5">
+                        <select className="text-xs font-black bg-white/60 px-2 py-1.5 rounded-lg text-slate-700 outline-none cursor-pointer hover:bg-white/80 transition-colors border-none shadow-sm" value={note.tag || ''} onChange={(e) => setNotes(notes.map(n => n.id === note.id ? {...n, tag: e.target.value} : n))}>
+                           <option value="">- 無相關人員 -</option>{users.map(u => <option key={u} value={u}>@ {u}</option>)}
+                        </select>
+                        <div className="flex flex-col items-end gap-2">
+                           <span className="text-[10px] font-bold text-slate-500">{new Date(note.createdAt).toLocaleString('zh-TW', {month:'numeric', day:'numeric', hour:'numeric', minute:'2-digit'})}</span>
+                           <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                              {noteColors.map(c => <button key={c} onClick={()=> setNotes(notes.map(n => n.id === note.id ? {...n, color: c} : n))} className={`w-3.5 h-3.5 rounded-full ${c} border border-black/10 hover:scale-110`}></button>)}
+                           </div>
+                        </div>
+                     </div>
+                     <button onClick={()=>setNotes(notes.filter(n=>n.id!==note.id))} className="absolute top-4 right-4 w-8 h-8 bg-white/50 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all text-slate-500 shadow-sm"><Trash2 className="w-4 h-4" /></button>
+                  </div>
+               ))}
+            </div>
+          </div>
+        );
+      };
+
+      const renderReport = () => {
+        const reportTasks = tasks.filter(t => t.assignee && t.assignee !== '' && t.assignee !== 'none' && t.status !== 'done');
+        const reportGroups = ['All', ...users];
+        const grouped = reportGroups.reduce((acc, user) => {
+          acc[user] = reportTasks.filter(t => t.assignee === user);
+          return acc;
+        }, {});
+
+        return (
+          <div className="w-full space-y-8 animate-in fade-in duration-300 pb-10">
+            <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-3">
+               <div className="bg-purple-100 p-2.5 rounded-xl"><MessageSquare className="w-6 h-6 text-purple-600" /></div>
+               <div>
+                  <h2 className="text-xl font-black text-slate-800">匯報清單 (One-on-One)</h2>
+                  <p className="text-slate-500 font-bold mt-1 text-sm">自動過濾所有標記了「匯報對象」且尚未完成的任務。</p>
+               </div>
+            </div>
+            {Object.entries(grouped).map(([user, userTasks]) => {
+               if (userTasks.length === 0) return null;
+               const displayName = user === 'All' ? 'All (所有主管)' : user;
+               return (
+                 <div key={user} className="flex flex-col gap-4">
+                    <h3 className="text-lg font-black text-purple-800 flex items-center gap-2 border-b border-purple-100 pb-2"><User className="w-5 h-5" /> 匯報給：{displayName} <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded-full">{userTasks.length}</span></h3>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                       {userTasks.map(task => <TaskCard key={task.id} task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} />)}
+                    </div>
+                 </div>
+               )
+            })}
+            {reportTasks.length === 0 && <div className="w-full py-12 text-center text-slate-400 font-bold bg-white rounded-3xl border border-dashed border-slate-200 shadow-sm">目前沒有需要匯報的任務</div>}
+          </div>
+        );
+      };
+
+      const renderSheet = () => (
+         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm w-full p-6 animate-in fade-in pb-10">
+            <h2 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2"><ListIcon className="w-6 h-6 text-indigo-500" /> 系統任務總表</h2>
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left border-collapse min-w-[1000px]">
+                <thead>
+                  <tr className="border-b-2 border-slate-200 text-slate-400 font-black text-sm">
+                    <th className="pb-3 pl-4">狀態</th><th className="pb-3 w-1/3">任務名稱</th><th className="pb-3">專案分類</th>
+                    <th className="pb-3">時段</th><th className="pb-3">匯報給</th><th className="pb-3">建立日期</th><th className="pb-3 text-right pr-4">總投入 (分)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {tasks.map(t => (
+                    <tr key={t.id} className="hover:bg-slate-50 transition-colors group">
+                      <td className="py-4 pl-4">{t.status === 'done' ? <span className="text-emerald-500 font-bold text-xs bg-emerald-50 px-2 py-1 rounded border border-emerald-100">已完成</span> : t.status === 'in-progress' ? <span className="text-indigo-500 font-bold text-xs bg-indigo-50 px-2 py-1 rounded border border-indigo-100">進行中</span> : <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-1 rounded border border-slate-200">待辦</span>}</td>
+                      <td className={`py-4 font-bold ${t.status==='done'?'text-slate-400 line-through':'text-slate-700'}`}>{t.text}</td>
+                      <td className="py-4 font-bold text-sm" style={{color: projects.find(p=>p.name===t.category)?.color || '#94a3b8'}}>{t.category || '無分類'}</td>
+                      <td className="py-4 font-bold text-slate-500 text-sm">{t.period}</td>
+                      <td className="py-4 font-bold text-purple-600 text-sm">{t.assignee || '-'}</td>
+                      <td className="py-4 font-bold text-slate-400 text-xs">{new Date(t.createdAt).toLocaleDateString()}</td>
+                      <td className="py-4 font-black text-slate-600 text-right pr-4">{isNaN(Number(t.timeSpent))?0:t.timeSpent}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+         </div>
+      );
+
+      const renderStats = () => {
+        const getRangeDates = () => {
+          const now = new Date();
+          const start = new Date(now); const end = new Date(now);
+          if (statsRange === 'custom') {
+            // 自訂期間；若起訖顛倒則自動對調
+            let a = customStart, b = customEnd;
+            if (a > b) { const t = a; a = b; b = t; }
+            const s = new Date(a + 'T00:00:00');
+            const e = new Date(b + 'T00:00:00'); e.setHours(23,59,59,999);
+            return { s, e };
+          }
+          if (statsRange === 'thisWeek' || statsRange === 'lastWeek') {
+            // 一週定義為「週六 ～ 次週週五」。getDay(): 日=0…六=6
+            const daysSinceSat = (now.getDay() + 1) % 7;
+            const s = new Date(now);
+            s.setDate(now.getDate() - daysSinceSat - (statsRange === 'lastWeek' ? 7 : 0));
+            s.setHours(0,0,0,0);
+            const e = new Date(s);
+            e.setDate(s.getDate() + 6); e.setHours(23,59,59,999);
+            return { s, e };
+          }
+          if (statsRange === 'thisMonth') {
+            start.setDate(1); start.setHours(0,0,0,0);
+            end.setMonth(start.getMonth() + 1); end.setDate(0); end.setHours(23,59,59,999);
+          } else if (statsRange === 'lastMonth') {
+            start.setMonth(start.getMonth() - 1); start.setDate(1); start.setHours(0,0,0,0);
+            end.setDate(0); end.setHours(23,59,59,999);
+          }
+          return { s: start, e: end };
+        };
+
+        const rangeDates = statsRange === 'all' ? null : getRangeDates();
+
+        let totalTime = 0, createdCount = 0, completedCount = 0;
+        let categoryMap = {}; let rangeFilteredTasks = [];
+
+        tasks.forEach(task => {
+          let taskTimeInRange = 0;
+          if (task.createdAt) {
+             const cDate = new Date(task.createdAt);
+             if (!rangeDates || (cDate >= rangeDates.s && cDate <= rangeDates.e)) createdCount++;
+          }
+          if (task.status === 'done') {
+             let lastTime = new Date(task.createdAt || Date.now());
+             if (task.logs && task.logs.length > 0 && task.logs[task.logs.length - 1].end) lastTime = new Date(task.logs[task.logs.length - 1].end);
+             if (!rangeDates || (lastTime >= rangeDates.s && lastTime <= rangeDates.e)) completedCount++;
+          }
+          if (task.logs && task.logs.length > 0) {
+             task.logs.forEach(log => {
+                const logDur = isNaN(Number(log.duration)) ? 0 : Number(log.duration);
+                if (logDur <= 0) return; 
+                const logStart = new Date(log.start);
+                if (!rangeDates || (logStart >= rangeDates.s && logStart <= rangeDates.e)) taskTimeInRange += logDur;
+             });
+          }
+          if (taskTimeInRange > 0) {
+             totalTime += taskTimeInRange;
+             const catName = task.category || '未分類/其他';
+             if (!categoryMap[catName]) {
+                 const proj = projects.find(p => p.name === catName);
+                 categoryMap[catName] = { name: catName, value: 0, color: proj ? proj.color : '#94a3b8' };
+             }
+             categoryMap[catName].value += taskTimeInRange;
+             if(!rangeFilteredTasks.find(t=>t.id===task.id)) rangeFilteredTasks.push({ ...task, timeInRange: taskTimeInRange });
+          }
+        });
+
+        const categoryStats = Object.values(categoryMap).sort((a,b) => b.value - a.value);
+        const inProgressList = rangeFilteredTasks.filter(t => t.status !== 'done').sort((a,b) => b.timeInRange - a.timeInRange);
+        const completedList = rangeFilteredTasks.filter(t => t.status === 'done').sort((a,b) => b.timeInRange - a.timeInRange);
+
+        const renderCustomizedLabelOuter = ({ cx, cy, midAngle, innerRadius, outerRadius, percent, index, name, fill }) => {
+          const RADIAN = Math.PI / 180;
+          const radius = outerRadius + 40; 
+          const x = cx + radius * Math.cos(-midAngle * RADIAN);
+          const y = cy + radius * Math.sin(-midAngle * RADIAN);
+          return (
+            <text x={x} y={y} fill={fill} textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="14" fontWeight="900">
+              <tspan x={x} dy="-0.6em">{name}</tspan>
+              <tspan x={x} dy="1.6em" fontSize="22">{`${(percent * 100).toFixed(0)}%`}</tspan>
+            </text>
+          );
+        };
+
+        return (
+          <div className="w-full space-y-6 pb-12 animate-in fade-in duration-300">
+            <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-3xl border border-slate-200 shadow-sm w-full">
+               <div className="flex bg-slate-100 rounded-xl p-1 overflow-x-auto custom-scrollbar">
+                 {['all','thisWeek','lastWeek','thisMonth','lastMonth','custom'].map(r => {
+                    const labels = { all:'所有時間', thisWeek:'本週', lastWeek:'上週', thisMonth:'本月', lastMonth:'上月', custom:'自訂期間' };
+                    return <button key={r} onClick={() => setStatsRange(r)} className={`px-4 py-2 text-sm font-bold rounded-lg transition-all whitespace-nowrap ${statsRange === r ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}>{labels[r]}</button>
+                 })}
+               </div>
+               <div className="flex flex-wrap items-center gap-3">
+                  {statsRange === 'custom' && (
+                     <div className="flex items-center gap-2 bg-indigo-50 px-3 py-2 rounded-xl border border-indigo-200">
+                        <input type="date" value={customStart} max={customEnd}
+                           onChange={(e) => setCustomStart(e.target.value)}
+                           className="text-sm font-bold text-slate-700 bg-white px-2 py-1.5 rounded-lg border border-slate-200 outline-none focus:border-indigo-400" />
+                        <span className="text-sm font-black text-slate-400">～</span>
+                        <input type="date" value={customEnd} min={customStart}
+                           onChange={(e) => setCustomEnd(e.target.value)}
+                           className="text-sm font-bold text-slate-700 bg-white px-2 py-1.5 rounded-lg border border-slate-200 outline-none focus:border-indigo-400" />
+                     </div>
+                  )}
+                  <div className="text-sm font-black text-slate-500 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-200 flex items-center gap-2 shadow-inner">
+                     <Calendar className="w-4 h-4 text-indigo-500" />
+                     {statsRange === 'all' ? '紀錄起始日 - 至今' : rangeDates ? `${rangeDates.s.toLocaleDateString()} - ${rangeDates.e.toLocaleDateString()}` : ''}
+                  </div>
+               </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
+              {[ { label: '區間內建立任務', value: createdCount, color: 'text-slate-700' }, { label: '區間內完成任務', value: completedCount, color: 'text-emerald-500' }, { label: '區間投入總時間', value: `${Math.floor(totalTime / 60)}h ${totalTime % 60}m`, color: 'text-indigo-700' }
+              ].map((kpi, idx) => (
+                 <div key={idx} className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
+                    <div className="text-sm font-black text-slate-400 mb-3 tracking-wide">{kpi.label}</div>
+                    <div className={`text-5xl font-black tracking-tight ${kpi.color}`}>{kpi.value}</div>
+                 </div>
+              ))}
+            </div>
+
+            <div className="flex flex-col xl:flex-row gap-6 w-full items-start">
+               <div className="w-full xl:w-[60%] flex flex-col gap-6">
+                  <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm flex flex-col items-center justify-center w-full min-h-[550px]">
+                     <h3 className="text-lg font-black text-slate-700 flex items-center gap-2 mb-6 w-full"><PieChartIcon className="w-5 h-5 text-indigo-600" /> 分類時間佔比</h3>
+                     <div className="w-full h-[450px]">
+                        {categoryStats.length > 0 && totalTime > 0 ? (
+                           <ResponsiveContainer width="100%" height="100%">
+                             <RechartsPieChart>
+                               <Pie data={categoryStats} cx="50%" cy="50%" innerRadius="55%" outerRadius="75%" paddingAngle={4} dataKey="value" stroke="none" label={renderCustomizedLabelOuter} labelLine={true}>
+                                 {categoryStats.map((e, i) => <Cell key={`cell-${i}`} fill={e.color} />)}
+                               </Pie>
+                               <Tooltip formatter={(value) => `${value} 分鐘`} contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontWeight: 'bold' }} />
+                             </RechartsPieChart>
+                           </ResponsiveContainer>
+                        ) : <div className="w-full h-full flex items-center justify-center text-slate-500/50 font-bold border-2 border-dashed border-slate-400/20 rounded-2xl">所選區間無時間紀錄</div>}
+                     </div>
+                  </div>
+               </div>
+               <div className="w-full xl:w-[40%] flex flex-col gap-6">
+                   {[
+                     { title: '進行中工作明細', icon: Play, data: inProgressList, color: 'blue' },
+                     { title: '已完成工作明細', icon: CheckCircle, data: completedList, color: 'emerald' }
+                   ].map(list => (
+                     <div key={list.title} className={`bg-white p-6 rounded-3xl border border-${list.color}-200 shadow-sm flex flex-col w-full relative overflow-hidden flex-1 min-h-[263px]`}>
+                       <div className={`absolute top-0 left-0 w-full h-1.5 bg-${list.color}-500`} />
+                       <h3 className={`text-lg font-black text-${list.color}-800 mb-6 flex items-center gap-2`}><list.icon className={`w-5 h-5 text-${list.color}-500 ${list.icon===Play?'fill-current':''}`} /> {list.title}</h3>
+                       <div className="w-full overflow-x-auto custom-scrollbar">
+                         <table className="w-full text-left text-sm whitespace-nowrap">
+                            <thead>
+                               <tr className="border-b border-slate-100 text-slate-400 font-bold">
+                                 <th className="pb-3 pr-4 font-normal">任務名稱</th><th className="pb-3 pr-4 font-normal">分類</th><th className="pb-3 text-right font-normal">投入</th>
+                               </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-50">
+                               {list.data.map(t => (
+                                  <tr key={t.id} className="hover:bg-slate-50 transition-colors">
+                                    <td className="py-3 pr-4 font-bold text-slate-700 truncate max-w-[150px]" title={t.text}>{t.text}</td>
+                                    <td className="py-3 pr-4 text-xs font-bold text-slate-500">{t.category || '-'}</td>
+                                    <td className={`py-3 text-right font-black ${list.color==='blue'?'text-blue-700':'text-emerald-600'}`}>{t.timeInRange}m</td>
+                                  </tr>
+                               ))}
+                               {list.data.length === 0 && <tr><td colSpan="3" className="py-8 text-center text-slate-400 font-bold bg-slate-50/50 rounded-xl mt-2">無時間紀錄</td></tr>}
+                            </tbody>
+                         </table>
+                       </div>
+                     </div>
+                   ))}
+               </div>
+            </div>
+          </div>
+        );
+      };
+
+      const renderSettings = () => {
+          const handleAddProject = () => {
+             if(settingsNewProject.trim() && !projects.find(p=>p.name===settingsNewProject.trim())) {
+                const colors = ['#f43f5e', '#f97316', '#eab308', '#84cc16', '#10b981', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#d946ef'];
+                const color = colors[projects.length % colors.length];
+                setProjects([...projects, { id: Date.now().toString(), name: settingsNewProject.trim(), color }]);
+                setSettingsNewProject('');
+             }
+          };
+          const handleSaveProject = (p) => {
+             if (editingProjectName.trim()) {
+               const newName = editingProjectName.trim();
+               setProjects(projects.map(x => x.id === p.id ? {...x, name: newName} : x));
+               setTasks(tasks.map(t => t.category === p.name ? {...t, category: newName} : t));
+               setEditingProject(null);
+             }
+          };
+          const handleAddUser = () => {
+             if(settingsNewUser.trim() && !users.includes(settingsNewUser.trim())) {
+                setUsers([...users, settingsNewUser.trim()]);
+                setSettingsNewUser('');
+             }
+          };
+
+          return (
+          <div className="w-full space-y-8 animate-in fade-in duration-300 pb-10">
+             <div className="bg-white p-8 md:p-10 rounded-3xl border border-slate-200 shadow-sm w-full">
+                <h2 className="text-2xl font-black text-slate-800 mb-2 flex items-center gap-3"><Settings className="w-7 h-7 text-indigo-500" /> 系統設定</h2>
+                <p className="text-slate-500 font-bold mb-10 text-sm">修改專案名稱將會自動同步所有舊任務的標籤。輸入完畢可直接按 Enter 鍵快速儲存。</p>
+
+                <div className="mb-12">
+                   <h3 className="text-lg font-black text-slate-700 mb-4 flex items-center gap-2"><BookOpen className="w-5 h-5" /> 專案分類管理</h3>
+                   <div className="bg-slate-50 p-6 md:p-8 rounded-3xl border border-slate-200 flex flex-col gap-6">
+                      <div className="flex items-center gap-3 w-full max-w-2xl">
+                        <input type="text" className="flex-1 bg-white border border-slate-200 text-slate-700 font-bold px-4 py-3 rounded-xl outline-none focus:border-indigo-400 shadow-sm" placeholder="輸入新專案名稱... (按 Enter 新增)" value={settingsNewProject} onChange={e=>setSettingsNewProject(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddProject()} />
+                        <button onClick={handleAddProject} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-6 py-3 rounded-xl transition-colors shadow-sm shrink-0">新增</button>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                         {projects.map(p => (
+                            <div key={p.id} className="flex items-center gap-2 bg-white border border-slate-200 pl-4 pr-2 py-2.5 rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+                               <div className="w-4 h-4 rounded-full shrink-0" style={{backgroundColor: p.color}}></div>
+                               {editingProject === p.id ? (
+                                 <input type="text" autoFocus className="flex-1 bg-slate-50 border border-slate-300 rounded px-2 py-1 text-sm font-bold text-slate-700 outline-none w-full" value={editingProjectName} onChange={e=>setEditingProjectName(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleSaveProject(p)} onBlur={() => handleSaveProject(p)} />
+                               ) : (
+                                 <span className="font-bold text-sm text-slate-700 flex-1 truncate">{p.name}</span>
+                               )}
+                               <div className="flex items-center gap-1 shrink-0 ml-auto">
+                                 {editingProject === p.id ? null : (
+                                   <button onClick={() => { setEditingProject(p.id); setEditingProjectName(p.name); }} className="w-7 h-7 rounded-full text-slate-400 hover:text-slate-700 hover:bg-slate-100 flex items-center justify-center transition-colors"><Edit2 className="w-3 h-3" /></button>
+                                 )}
+                                 <button onClick={() => {
+                                    showDialog('刪除專案', `確定要刪除專案 [${p.name}] 嗎？任務將失去分類。`, () => { setProjects(projects.filter(x=>x.id!==p.id)); closeDialog(); }, 'danger');
+                                 }} className="w-7 h-7 rounded-full text-slate-400 hover:text-red-500 hover:bg-red-100 flex items-center justify-center transition-colors"><Trash2 className="w-3 h-3" /></button>
+                               </div>
+                            </div>
+                         ))}
+                      </div>
+                   </div>
+                </div>
+
+                <div>
+                   <h3 className="text-lg font-black text-slate-700 mb-4 flex items-center gap-2"><User className="w-5 h-5" /> 人員名單管理</h3>
+                   <div className="bg-slate-50 p-6 md:p-8 rounded-3xl border border-slate-200 flex flex-col gap-6">
+                      <div className="flex items-center gap-3 w-full max-w-2xl">
+                        <input type="text" className="flex-1 bg-white border border-slate-200 text-slate-700 font-bold px-4 py-3 rounded-xl outline-none shadow-sm focus:border-indigo-400" placeholder="輸入人員姓名... (按 Enter 新增)" value={settingsNewUser} onChange={e=>setSettingsNewUser(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddUser()} />
+                        <button onClick={handleAddUser} className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-6 py-3 rounded-xl transition-colors shadow-sm shrink-0">新增</button>
+                      </div>
+                      <div className="flex flex-wrap gap-3">
+                         {users.map(u => (
+                            <div key={u} className="flex items-center gap-2 bg-white border border-slate-200 pl-4 pr-1 py-1.5 rounded-full shadow-sm">
+                               <span className="font-bold text-sm text-slate-700">{u}</span>
+                               <button onClick={() => {
+                                  if(DEFAULT_USERS.includes(u)) { showDialog('無法刪除', '系統預設人員不可刪除。', closeDialog, 'info'); return; }
+                                  showDialog('刪除人員', `確定要刪除 [${u}] 嗎？`, () => { setUsers(users.filter(x=>x!==u)); closeDialog(); }, 'danger');
+                               }} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors"><X className="w-4 h-4" /></button>
+                            </div>
+                         ))}
+                      </div>
+                   </div>
+                </div>
+             </div>
+          </div>
+          );
+      };
+
+      const renderGuide = () => (
+        <div className="w-full space-y-6 animate-in fade-in pb-10">
+          <div className="bg-gradient-to-br from-slate-700 to-slate-900 p-10 rounded-3xl text-white shadow-lg">
+            <h2 className="text-3xl font-black mb-4 flex items-center gap-3"><Info className="w-8 h-8" /> 系統說明與急救手冊</h2>
+            <p className="text-slate-300 font-bold text-lg leading-relaxed">這裡包含了核心功能的實戰操作技巧，以及遇到異常狀況時的快速排解指南。</p>
+          </div>
+          <h3 className="text-2xl font-black text-slate-800 mt-8 mb-4 px-2">✨ 核心功能實戰技巧</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+               <h4 className="text-lg font-black text-indigo-600 mb-2 flex items-center gap-2"><LayoutDashboard className="w-5 h-5" /> 彈性看板模式</h4>
+               <p className="text-slate-600 font-bold text-sm leading-relaxed">新增任務後，卡片會自動長高以顯示所有內容。超過 7 天的已完成任務會自動隱藏。點擊左側「所有工作專案(ALL)」可以跨專案綜觀所有任務。</p>
+            </div>
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+               <h4 className="text-lg font-black text-emerald-600 mb-2 flex items-center gap-2"><PenSquare className="w-5 h-5" /> 隨手筆記區</h4>
+               <p className="text-slate-600 font-bold text-sm leading-relaxed">提供多種顏色的馬卡龍便利貼。滑鼠按住便利貼即可拖曳改變排序（把重要的往前拉），左下角還能隨時更改指派的人員。</p>
+            </div>
+          </div>
+          <h3 className="text-2xl font-black text-slate-800 mt-8 mb-4 px-2">🚑 疑難雜症急救指南</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-red-600 mb-2 flex items-center gap-2">任務突然不見了？</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">1. 檢查是否移到了「已完成」超過 7 天，可至「任務總表」中尋找。<br/>2. 檢查左側邊欄是否選到了單一專案，請切換回「所有工作專案 (ALL)」。</p></div>
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-amber-600 mb-2 flex items-center gap-2">時數輸入錯誤怎麼辦？</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">請將滑鼠移到任務卡片下方的「投入歷程」紀錄上，最右側會浮現「垃圾桶」圖示，點擊即可刪除該筆錯誤的時間，總時數會自動重新計算。</p></div>
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-slate-700 mb-2 flex items-center gap-2">專案名稱打錯想修改</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">請至「系統設定」，點擊專案旁邊的鉛筆圖示，修改完成後按下 Enter 鍵即可。全系統舊任務的標籤會自動同步為新名稱。</p></div>
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-teal-600 mb-2 flex items-center gap-2">畫面卡住或異常</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">若持續異常，請點擊左下角「備份下載」將 JSON 檔案匯出，重新整理網頁後，再使用「還原資料」匯入即可恢復正常。</p></div>
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="flex w-full h-screen bg-slate-50 font-sans overflow-hidden">
+          {dialog && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+              <div className="bg-white p-8 rounded-3xl shadow-2xl max-w-md w-full animate-in zoom-in-95 duration-200">
+                 <h3 className={`text-xl font-black mb-4 flex items-center gap-2 ${dialog.type === 'danger' ? 'text-red-600' : 'text-slate-800'}`}>
+                   {dialog.type === 'danger' && <Trash2 className="w-6 h-6" />} {dialog.title}
+                 </h3>
+                 <p className="text-slate-600 font-bold mb-8 leading-relaxed text-lg">{dialog.message}</p>
+                 <div className="flex justify-end gap-3 w-full">
+                   {dialog.onCancel && <button onClick={dialog.onCancel} className="flex-1 px-4 py-3 bg-slate-100 text-slate-600 rounded-xl font-black hover:bg-slate-200 transition-colors">取消</button>}
+                   <button onClick={dialog.onConfirm} className={`flex-1 px-4 py-3 text-white rounded-xl font-black transition-colors ${dialog.type === 'danger' ? 'bg-red-500 hover:bg-red-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}>確定執行</button>
+                 </div>
+              </div>
+            </div>
+          )}
+
+          <input type="file" ref={fileInputRef} onChange={handleImport} accept=".json" className="hidden" />
+
+          <div className={`flex flex-col bg-slate-900 text-slate-300 transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-0 overflow-hidden opacity-0'} shrink-0 h-full border-r border-slate-800 relative z-40`}>
+            <div className="h-20 flex items-center px-6 border-b border-slate-800 shrink-0 bg-slate-950/50">
+               <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center mr-3 shadow-lg shadow-indigo-500/20"><CheckCircle className="w-5 h-5 text-white" /></div>
+               <span className="text-xl font-black text-white tracking-tight">TaskFlow</span>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto custom-scrollbar py-6 flex flex-col gap-8">
+               <div className="flex flex-col gap-1 px-4">
+                 <div className="text-[10px] font-black text-slate-500 mb-2 px-2 tracking-widest uppercase">主要功能 MAIN</div>
+                 {[
+                   { id: 'board', icon: LayoutDashboard, label: '看板模式' },
+                   { id: 'sheet', icon: ListIcon, label: '任務總表' },
+                   { id: 'notes', icon: PenSquare, label: '隨手筆記' },
+                   { id: 'report', icon: MessageSquare, label: '匯報清單' },
+                   { id: 'stats', icon: BarChart2, label: '統計報表' },
+                   { id: 'settings', icon: Settings, label: '系統設定' },
+                   { id: 'guide', icon: Info, label: '系統說明' }
+                 ].map(item => (
+                   <button key={item.id} onClick={() => setActiveView(item.id)} className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50' : 'hover:bg-slate-800 hover:text-white'}`}>
+                     <item.icon className="w-5 h-5" /> {item.label}
+                   </button>
+                 ))}
+               </div>
+
+               <div className="flex flex-col gap-1 px-4">
+                 <div className="text-[10px] font-black text-slate-500 mb-2 px-2 tracking-widest uppercase">專案過濾 FILTER</div>
+                 <button onClick={() => {setActiveView('board'); setFilterType('all'); setFilterProject('ALL');}} className={`flex items-center justify-between px-4 py-2.5 rounded-xl font-bold transition-all ${activeView==='board' && filterType==='all' ? 'bg-slate-800 text-white' : 'hover:bg-slate-800/50 hover:text-white'}`}>
+                   <div className="flex items-center gap-3"><BookOpen className="w-4 h-4 opacity-70" /> 所有任務</div>
+                   <span className="bg-slate-800 text-xs px-2 py-0.5 rounded-full">{tasks.length}</span>
+                 </button>
+                 
+                 <div className="flex flex-col mt-2">
+                   <button onClick={() => {setActiveView('board'); setFilterType('work'); setFilterProject('ALL');}} className={`flex items-center justify-between px-4 py-2.5 rounded-xl font-bold transition-all ${activeView==='board' && filterType==='work' && filterProject==='ALL' ? 'bg-indigo-500/20 text-indigo-400' : 'hover:bg-slate-800/50 text-slate-300 hover:text-white'}`}>
+                     <span className="flex items-center gap-3"><BookOpen className="w-4 h-4" /> 💼 所有工作專案</span>
+                   </button>
+                   <div className="flex flex-col gap-0.5 mt-1 ml-6 border-l-2 border-slate-800/80 pl-2">
+                     {projects.map(p => {
+                        const count = tasks.filter(t => t.category === p.name).length;
+                        return (
+                         <button key={p.id} onClick={() => {setActiveView('board'); setFilterType('work'); setFilterProject(p.name);}} className={`flex items-center justify-between px-3 py-2 rounded-lg text-sm font-bold transition-all ${activeView==='board' && filterProject===p.name ? 'bg-slate-800 text-white' : 'hover:bg-slate-800/50 text-slate-400 hover:text-slate-200'}`}>
+                           <span className="truncate flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-full shadow-sm" style={{backgroundColor: p.color}} /> {p.name}</span>
+                           <span className="bg-slate-800 text-[10px] px-1.5 py-0.5 rounded-md">{count}</span>
+                         </button>
+                        )
+                     })}
+                   </div>
+                 </div>
+               </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-800 flex gap-2 bg-slate-950/50">
+               <button onClick={handleExport} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="直接下載備份檔，無需確認"><Download className="w-3.5 h-3.5" /> 備份下載</button>
+               <button onClick={() => fileInputRef.current.click()} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="上傳還原"><Upload className="w-3.5 h-3.5" /> 還原資料</button>
+            </div>
+          </div>
+
+          <div className="flex-1 flex flex-col h-full overflow-hidden w-full relative bg-slate-50/50">
+             <div className="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-8 shrink-0 z-10 w-full shadow-sm">
+                <div className="flex items-center gap-4">
+                  <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-500 transition-colors bg-slate-50 border border-slate-200">
+                     <AlignLeft className="w-5 h-5" />
+                  </button>
+                  <h1 className="text-2xl font-black text-slate-800 tracking-tight hidden sm:block">
+                    {activeView === 'board' && (filterProject !== 'ALL' ? filterProject : filterType === 'work' ? '所有工作專案' : filterType === 'uncat' ? '未分類任務' : filterType === 'life' ? '生活個人' : '所有任務')}
+                    {activeView === 'sheet' && '任務總表'}
+                    {activeView === 'notes' && '隨手筆記'}
+                    {activeView === 'report' && '匯報清單 (One-on-One)'}
+                    {activeView === 'stats' && '統計報表'}
+                    {activeView === 'settings' && '系統設定'}
+                    {activeView === 'guide' && '📖 系統說明'}
+                  </h1>
+                </div>
+                <div className="flex items-center gap-3">
+                   <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-4 py-2 rounded-full text-sm font-bold border border-emerald-100 shadow-sm">
+                      <CheckCircle className="w-4 h-4" /> 已自動儲存
+                   </div>
+                </div>
+             </div>
+
+             <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 w-full relative">
+                {activeView === 'board' && renderBoard()}
+                {activeView === 'sheet' && renderSheet()}
+                {activeView === 'notes' && renderNotes()}
+                {activeView === 'report' && renderReport()}
+                {activeView === 'stats' && renderStats()}
+                {activeView === 'settings' && renderSettings()}
+                {activeView === 'guide' && renderGuide()}
+             </div>
+          </div>
+        </div>
+      );
+    }
+
+    // 將 TaskManager 渲染到畫面上
+    const root = createRoot(document.getElementById('root'));
+    root.render(<TaskManager />);
+  </script>
+</body>
+</html>
