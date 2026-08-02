@@ -621,6 +621,125 @@
       );
     };
 
+    // 知識管理（簡化版 OneNote；透過 setKnowledge 回拋，外層負責雲端同步。平行 Agent 產出，整合時已回歸測試）
+    const KnowledgeBase = ({ knowledge, setKnowledge }) => {
+      const pages = Array.isArray(knowledge) ? knowledge : [];
+      const [activeCat, setActiveCat] = React.useState('__ALL__');
+      const [query, setQuery] = React.useState('');
+      const [editing, setEditing] = React.useState(null);
+      const [collapsed, setCollapsed] = React.useState(false);
+      const [fTitle, setFTitle] = React.useState('');
+      const [fCat, setFCat] = React.useState('');
+      const [fContent, setFContent] = React.useState('');
+      const s = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+      const fmtDate = (v) => { const n = typeof v === 'number' ? v : Number(v); if (!n || isNaN(n)) return '—'; const d = new Date(n); if (isNaN(d.getTime())) return '—'; return d.toLocaleDateString(); };
+      const categories = React.useMemo(() => { const set = []; pages.forEach((p) => { const c = s(p && p.category).trim(); if (c && set.indexOf(c) === -1) set.push(c); }); return set.sort((a, b) => a.localeCompare(b)); }, [pages]);
+      const filtered = React.useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return pages.filter((p) => p && typeof p === 'object')
+          .filter((p) => activeCat === '__ALL__' ? true : s(p.category).trim() === activeCat)
+          .filter((p) => !q ? true : (s(p.title).toLowerCase().indexOf(q) !== -1 || s(p.content).toLowerCase().indexOf(q) !== -1))
+          .sort((a, b) => (Number(b.updatedAt) || 0) - (Number(a.updatedAt) || 0));
+      }, [pages, activeCat, query]);
+      const openNew = () => { setFTitle(''); setFCat(activeCat !== '__ALL__' ? activeCat : ''); setFContent(''); setEditing('NEW'); };
+      const openEdit = (p) => { setFTitle(s(p.title)); setFCat(s(p.category)); setFContent(s(p.content)); setEditing(p); };
+      const save = () => {
+        const title = fTitle.trim(); const category = fCat.trim(); const content = fContent;
+        if (!title) { alert('請輸入標題'); return; }
+        const now = Date.now(); let next;
+        if (editing === 'NEW') { const id = 'kb_' + now + '_' + Math.random().toString(36).slice(2, 8); next = pages.concat([{ id, title, category, content, updatedAt: now }]); }
+        else { const targetId = editing && editing.id; next = pages.map((p) => p && p.id === targetId ? { ...p, title, category, content, updatedAt: now } : p); }
+        setKnowledge(next); setEditing(null);
+      };
+      const remove = (p) => { if (!p || !p.id) return; if (!window.confirm('確定要刪除這則知識頁嗎？此動作無法復原。')) return; const next = pages.filter((x) => x && x.id !== p.id); setKnowledge(next); if (editing && editing.id === p.id) setEditing(null); };
+      const preview = (v) => { const t = s(v).replace(/\s+/g, ' ').trim(); return t.length > 60 ? t.slice(0, 60) + '…' : t; };
+      if (editing) {
+        const isNew = editing === 'NEW';
+        return (
+          <div className="max-w-3xl mx-auto animate-in fade-in duration-300">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-6 sm:p-8">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2"><FileText size={20} className="text-indigo-500" /> {isNew ? '新增知識頁' : '編輯知識頁'}</h2>
+                <button onClick={() => setEditing(null)} className="p-2 rounded-full hover:bg-slate-100 text-slate-500" title="取消"><X size={18} /></button>
+              </div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">標題</label>
+              <input value={fTitle} onChange={(e) => setFTitle(e.target.value)} placeholder="請輸入標題" className="w-full mb-4 px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none text-slate-800" />
+              <label className="block text-sm font-medium text-slate-600 mb-1">分類</label>
+              <input value={fCat} onChange={(e) => setFCat(e.target.value)} placeholder="輸入或沿用既有分類（可留空）" list="kb-cat-list" className="w-full mb-1 px-4 py-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none text-slate-800" />
+              <datalist id="kb-cat-list">{categories.map((c) => (<option key={c} value={c} />))}</datalist>
+              {categories.length > 0 && (<div className="flex flex-wrap gap-1.5 mb-4 mt-2">{categories.map((c) => (<button key={c} onClick={() => setFCat(c)} className="text-xs px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-600 hover:bg-indigo-100">{c}</button>))}</div>)}
+              <label className="block text-sm font-medium text-slate-600 mb-1 mt-2">內容</label>
+              <textarea value={fContent} onChange={(e) => setFContent(e.target.value)} placeholder="在此輸入內容，支援換行…" rows={12} className="w-full mb-6 px-4 py-3 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none text-slate-800 resize-y leading-relaxed" />
+              <div className="flex items-center justify-between gap-3">
+                <div>{!isNew && (<button onClick={() => remove(editing)} className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-rose-600 hover:bg-rose-50 font-medium"><Trash2 size={16} /> 刪除</button>)}</div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setEditing(null)} className="px-4 py-2.5 rounded-xl text-slate-600 hover:bg-slate-100 font-medium">取消</button>
+                  <button onClick={save} className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-medium shadow-sm"><Check size={16} /> 儲存</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      }
+      const totalCount = pages.length;
+      return (
+        <div className="flex flex-col md:flex-row gap-4 md:gap-6 h-full min-h-0 animate-in fade-in duration-300">
+          <aside className="md:w-60 md:flex-shrink-0">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 md:sticky md:top-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><BookOpen size={16} className="text-indigo-500" /> 分類</h3>
+                <button onClick={() => setCollapsed((v) => !v)} className="md:hidden p-1.5 rounded-lg hover:bg-slate-100 text-slate-500" title="展開／收合"><ChevronDown size={16} className={collapsed ? '' : 'rotate-180 transition-transform'} /></button>
+              </div>
+              <div className={(collapsed ? 'hidden md:block ' : 'block ') + 'max-h-56 md:max-h-[60vh] overflow-y-auto pr-1 space-y-1'}>
+                <button onClick={() => setActiveCat('__ALL__')} className={'w-full text-left px-3 py-2 rounded-xl text-sm flex items-center justify-between ' + (activeCat === '__ALL__' ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-50')}><span>全部</span><span className="text-xs text-slate-400">{totalCount}</span></button>
+                {categories.map((c) => { const cnt = pages.filter((p) => p && s(p.category).trim() === c).length; return (<button key={c} onClick={() => setActiveCat(c)} className={'w-full text-left px-3 py-2 rounded-xl text-sm flex items-center justify-between ' + (activeCat === c ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-600 hover:bg-slate-50')}><span className="truncate">{c}</span><span className="text-xs text-slate-400 ml-2 flex-shrink-0">{cnt}</span></button>); })}
+              </div>
+              <button onClick={openNew} className="mt-3 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl border border-dashed border-indigo-300 text-indigo-600 hover:bg-indigo-50 text-sm font-medium"><Plus size={16} /> 新增知識頁</button>
+            </div>
+          </aside>
+          <main className="flex-1 min-w-0 flex flex-col min-h-0">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="relative flex-1">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜尋標題與內容…" className="w-full pl-9 pr-8 py-2.5 rounded-2xl border border-slate-200 bg-white shadow-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 outline-none text-sm text-slate-800" />
+                {query && (<button onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-slate-100 text-slate-400" title="清除"><X size={14} /></button>)}
+              </div>
+              <button onClick={openNew} className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium shadow-sm flex-shrink-0"><Plus size={16} /><span className="hidden sm:inline">新增</span></button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+              {filtered.length === 0 ? (
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-10 text-center">
+                  <div className="mx-auto w-14 h-14 rounded-2xl bg-indigo-50 flex items-center justify-center mb-4"><BookOpen size={26} className="text-indigo-400" /></div>
+                  <p className="text-slate-700 font-medium mb-1">{totalCount === 0 ? '尚無知識頁' : '找不到符合的頁面'}</p>
+                  <p className="text-sm text-slate-500 mb-5">{totalCount === 0 ? '把常用的筆記、SOP、聯絡資訊記在這裡，隨時可搜尋。' : '試試換個關鍵字或切換分類。'}</p>
+                  {totalCount === 0 && (<button onClick={openNew} className="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium shadow-sm"><Plus size={16} /> 建立第一則知識頁</button>)}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {filtered.map((p) => (
+                    <div key={p.id || Math.random()} onClick={() => openEdit(p)} className="group bg-white rounded-3xl border border-slate-200 shadow-sm p-5 hover:border-indigo-300 hover:shadow-md transition cursor-pointer flex flex-col">
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <h4 className="font-semibold text-slate-800 truncate flex-1">{s(p.title).trim() || '（無標題）'}</h4>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition flex-shrink-0">
+                          <button onClick={(e) => { e.stopPropagation(); openEdit(p); }} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-500" title="編輯"><Edit2 size={15} /></button>
+                          <button onClick={(e) => { e.stopPropagation(); remove(p); }} className="p-1.5 rounded-lg hover:bg-rose-50 text-rose-500" title="刪除"><Trash2 size={15} /></button>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        {s(p.category).trim() && (<span className="text-xs px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-600">{s(p.category).trim()}</span>)}
+                        <span className="text-xs text-slate-400">更新於 {fmtDate(p.updatedAt)}</span>
+                      </div>
+                      <p className="text-sm text-slate-500 whitespace-pre-wrap line-clamp-2 min-h-0">{preview(p.content) || '（無內容）'}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </main>
+        </div>
+      );
+    };
+
     function TaskManager({ uid, userEmail }) {
       const [activeView, setActiveView] = useState('board');
       const [searchQuery, setSearchQuery] = useState('');
@@ -632,6 +751,7 @@
       const [projects, setProjects] = useState(DEFAULT_PROJECTS);
       const [users, setUsers] = useState(DEFAULT_USERS);
       const [notes, setNotes] = useState([]);
+      const [knowledge, setKnowledge] = useState([]);
 
       const [dialog, setDialog] = useState(null); 
       const [filterType, setFilterType] = useState('all'); 
@@ -670,7 +790,7 @@
       const buildLocalPayload = () => {
         let catMap = {};
         try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
-        return { tasks, projects, users, notes, catMap };
+        return { tasks, projects, users, notes, catMap, knowledge };
       };
 
       // 立即把待寫資料寫回雲端（去抖到期、或關頁前 flush 都走這裡）
@@ -711,7 +831,8 @@
                   projects: Array.isArray(d.projects) && d.projects.length ? d.projects : DEFAULT_PROJECTS,
                   users: Array.isArray(d.users) ? d.users : [],
                   notes: Array.isArray(d.notes) ? d.notes : [],
-                  catMap: d.catMap || {}
+                  catMap: d.catMap || {},
+                  knowledge: Array.isArray(d.knowledge) ? d.knowledge : []
                 };
                 const healedTasks = payload.tasks.map(t => healTaskData(t));
                 const mergedUsers = [...new Set([...DEFAULT_USERS, ...payload.users])];
@@ -720,8 +841,9 @@
                 setProjects(payload.projects);
                 setUsers(mergedUsers);
                 setNotes(payload.notes);
-                // 記錄「已與雲端一致」的 healed 版本，寫效果才不會多寫一次
-                syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap });
+                setKnowledge(payload.knowledge);
+                // 記錄「已與雲端一致」的 healed 版本（key 順序須與 buildLocalPayload 一致），寫效果才不會多寫一次
+                syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap, knowledge: payload.knowledge });
               }
             }
             // exists 或 not-exists（首次登入）都算「成功讀到」→ 之後才允許寫入
@@ -747,7 +869,7 @@
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(() => flushSaveRef.current(), 800);
         return () => { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); } };
-      }, [tasks, projects, users, notes, isLoaded, uid]);
+      }, [tasks, projects, users, notes, knowledge, isLoaded, uid]);
 
       useEffect(() => {
         let interval = null;
@@ -1488,6 +1610,7 @@
                    { id: 'planner', icon: Calendar, label: '每日/週計劃' },
                    { id: 'notes', icon: PenSquare, label: '隨手筆記' },
                    { id: 'report', icon: MessageSquare, label: '匯報清單' },
+                   { id: 'kb', icon: BookOpen, label: '知識管理' },
                    { id: 'stats', icon: BarChart2, label: '統計報表' },
                    { id: 'ceo', icon: TrendingUp, label: 'CEO 儀表板' },
                    { id: 'settings', icon: Settings, label: '系統設定' },
@@ -1549,6 +1672,7 @@
                     {activeView === 'notes' && '隨手筆記'}
                     {activeView === 'report' && '匯報清單 (One-on-One)'}
                     {activeView === 'stats' && '統計報表'}
+                    {activeView === 'kb' && '知識管理'}
                     {activeView === 'ceo' && 'CEO 進度儀表板'}
                     {activeView === 'settings' && '系統設定'}
                     {activeView === 'guide' && '📖 系統說明'}
@@ -1588,6 +1712,7 @@
                 {activeView === 'report' && renderReport()}
                 {activeView === 'stats' && renderStats()}
                 {activeView === 'ceo' && <CeoDashboard tasks={tasks} projects={projects} />}
+                {activeView === 'kb' && <KnowledgeBase knowledge={knowledge} setKnowledge={setKnowledge} />}
                 {activeView === 'settings' && renderSettings()}
                 {activeView === 'guide' && renderGuide()}
              </div>
