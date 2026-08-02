@@ -1202,11 +1202,11 @@
                     {activeView === 'settings' && '系統設定'}
                     {activeView === 'guide' && '📖 系統說明'}
                   </h1>
-                  <div className="relative hidden md:block">
+                  <div className="relative block">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
-                      placeholder="搜尋任務（標題／備註／負責人／分類）…"
-                      className="w-64 lg:w-80 pl-9 pr-8 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-400 transition-all" />
+                      placeholder="搜尋任務…"
+                      className="w-36 sm:w-64 lg:w-80 pl-9 pr-8 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-400 transition-all" />
                     {searchQuery && <button onClick={()=>setSearchQuery('')} title="清除搜尋" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4"/></button>}
                   </div>
                 </div>
