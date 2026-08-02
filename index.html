@@ -46,7 +46,7 @@
       LayoutDashboard, List as ListIcon, PenSquare, MessageSquare, BarChart2, 
       Settings, BookOpen, Plus, Search, Filter, Calendar, Clock, User, 
       Trash2, Edit2, Play, Square, CheckCircle, ChevronDown, PieChart as PieChartIcon, 
-      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy
+      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
@@ -831,6 +831,156 @@
                 ))}
               </div>
             )}
+          </div>
+        </div>
+      );
+    };
+
+    // 已完成任務（唯讀，依分類分組彙整。平行 Agent 產出，整合時修正分類查詢改用名稱、已回歸測試）
+    const CompletedTasks = ({ tasks, projects }) => {
+      const { useState, useMemo } = React;
+      const safeArr = (v) => (Array.isArray(v) ? v : []);
+      const safeNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+      const fmtDate = (v) => { if (!v) return '—'; const d = new Date(v); if (isNaN(d.getTime())) return '—'; try { return d.toLocaleString('zh-TW', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }); } catch (e) { return '—'; } };
+      const getDoneTime = (t) => { const logs = safeArr(t && t.logs); for (let i = logs.length - 1; i >= 0; i--) { const end = logs[i] && logs[i].end; if (end) { const d = new Date(end); if (!isNaN(d.getTime())) return d.getTime(); } } if (t && t.createdAt) { const d = new Date(t.createdAt); if (!isNaN(d.getTime())) return d.getTime(); } return null; };
+      const getDoneTimeLabel = (t) => { const ms = getDoneTime(t); return ms == null ? '—' : fmtDate(ms); };
+      const getMinutes = (t) => safeNum(t && t.timeSpent);
+      const projectList = safeArr(projects);
+      // 本專案 task.category 存的是專案「名稱」→ 用名稱查（非 id）
+      const projByName = useMemo(() => { const m = {}; projectList.forEach((p) => { if (p && p.name != null) m[String(p.name)] = p; }); return m; }, [projectList]);
+      const catMeta = (catId) => { const p = projByName[String(catId)]; const name = (p && p.name) || (catId ? String(catId) : '未分類'); const color = (p && p.color) || '#94a3b8'; return { name, color }; };
+      const doneTasks = useMemo(() => safeArr(tasks).filter((t) => t && t.status === 'done'), [tasks]);
+      const [keyword, setKeyword] = useState('');
+      const kw = keyword.trim().toLowerCase();
+      const filtered = useMemo(() => { if (!kw) return doneTasks; return doneTasks.filter((t) => { const text = String((t && t.text) || '').toLowerCase(); const cat = catMeta(t && t.category).name.toLowerCase(); const assignee = String((t && t.assignee) || '').toLowerCase(); return text.includes(kw) || cat.includes(kw) || assignee.includes(kw); }); }, [doneTasks, kw, projByName]);
+      const groups = useMemo(() => {
+        const map = {};
+        filtered.forEach((t) => { const key = t && t.category != null ? String(t.category) : '__none__'; if (!map[key]) { const meta = catMeta(t && t.category); map[key] = { key, name: meta.name, color: meta.color, items: [], minutes: 0 }; } map[key].items.push(t); map[key].minutes += getMinutes(t); });
+        const arr = Object.values(map);
+        arr.forEach((g) => { g.items.sort((a, b) => { const ta = getDoneTime(a); const tb = getDoneTime(b); if (ta == null && tb == null) return 0; if (ta == null) return 1; if (tb == null) return -1; return tb - ta; }); });
+        arr.sort((a, b) => b.items.length - a.items.length);
+        return arr;
+      }, [filtered, projByName]);
+      const [collapsed, setCollapsed] = useState(() => new Set());
+      const toggle = (key) => { setCollapsed((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; }); };
+      const totalCount = doneTasks.length;
+      const totalMinutes = useMemo(() => doneTasks.reduce((s, t) => s + getMinutes(t), 0), [doneTasks]);
+      const totalHours = (totalMinutes / 60).toFixed(1);
+      const catCount = useMemo(() => { const s = new Set(); doneTasks.forEach((t) => s.add(t && t.category != null ? String(t.category) : '__none__')); return s.size; }, [doneTasks]);
+      const SummaryCard = ({ icon, value, label, tint }) => (
+        <div className="flex-1 min-w-[130px] bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex items-center gap-3">
+          <div className={'w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ' + tint}>{icon}</div>
+          <div className="min-w-0"><div className="text-2xl font-bold text-slate-800 leading-tight">{value}</div><div className="text-xs text-slate-500 truncate">{label}</div></div>
+        </div>
+      );
+      return (
+        <div className="space-y-5 animate-in fade-in duration-300 pb-12">
+          <div className="flex flex-wrap gap-3">
+            <SummaryCard icon={<CheckCircle className="w-5 h-5 text-indigo-600" />} value={totalCount} label="已完成任務" tint="bg-indigo-50" />
+            <SummaryCard icon={<Clock className="w-5 h-5 text-sky-600" />} value={totalHours + ' h'} label="總投入時數" tint="bg-sky-50" />
+            <SummaryCard icon={<Calendar className="w-5 h-5 text-slate-600" />} value={catCount} label="涵蓋分類" tint="bg-slate-100" />
+          </div>
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-3">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜尋任務、分類或負責人…" className="w-full pl-9 pr-9 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300" />
+              {keyword && (<button onClick={() => setKeyword('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="清除"><X className="w-4 h-4" /></button>)}
+            </div>
+          </div>
+          {groups.length === 0 ? (
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-10 flex flex-col items-center justify-center text-center">
+              <div className="w-14 h-14 rounded-full bg-indigo-50 flex items-center justify-center mb-3"><CheckCircle className="w-7 h-7 text-indigo-400" /></div>
+              <div className="text-slate-700 font-semibold mb-1">{kw ? '找不到符合的已完成任務' : '尚無已完成任務'}</div>
+              <div className="text-sm text-slate-500">{kw ? '換個關鍵字再試試看。' : '完成任務後就會彙整在這裡囉！'}</div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {groups.map((g) => {
+                const isOpen = !collapsed.has(g.key);
+                return (
+                  <div key={g.key} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                    <button onClick={() => toggle(g.key)} className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left">
+                      <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
+                      <span className="font-semibold text-slate-800 truncate">{g.name}</span>
+                      <span className="text-xs font-medium text-indigo-600 bg-indigo-50 rounded-full px-2 py-0.5 shrink-0">{g.items.length} 件</span>
+                      <span className="text-xs text-slate-400 shrink-0 hidden sm:inline">{Math.round(g.minutes)} 分鐘</span>
+                      <ChevronDown className={'w-5 h-5 text-slate-400 ml-auto shrink-0 transition-transform ' + (isOpen ? 'rotate-180' : '')} />
+                    </button>
+                    {isOpen && (
+                      <div className="border-t border-slate-100 divide-y divide-slate-100 max-h-[420px] overflow-y-auto">
+                        {g.items.map((t, idx) => (
+                          <div key={(t && t.id != null ? t.id : 'idx') + '-' + idx} className="px-5 py-3">
+                            <div className="text-sm font-medium text-slate-800 break-words">{String((t && t.text) || '（無標題）')}</div>
+                            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                              <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-400" />{getDoneTimeLabel(t)}</span>
+                              <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-400" />{Math.round(getMinutes(t))} 分鐘</span>
+                              {t && t.assignee ? (<span className="inline-flex items-center gap-1 text-slate-600">{String(t.assignee)}</span>) : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    };
+
+    // 工作台：今日集中 / 暫緩 / 未指定（透過 setTasks 只改 zone 欄位回拋。平行 Agent 產出，整合時已回歸測試）
+    const FocusZones = ({ tasks, setTasks }) => {
+      const list = Array.isArray(tasks) ? tasks : [];
+      const active = list.filter((t) => t && t.status !== 'done');
+      const zoneOf = (t) => { const z = t && t.zone; return z === 'focus' || z === 'hold' ? z : 'none'; };
+      const focusTasks = active.filter((t) => zoneOf(t) === 'focus');
+      const holdTasks = active.filter((t) => zoneOf(t) === 'hold');
+      const noneTasks = active.filter((t) => zoneOf(t) === 'none');
+      const moveTo = (taskId, nextZone) => { setTasks(list.map((t) => { if (!t || t.id !== taskId) return t; const z = nextZone === 'focus' || nextZone === 'hold' ? nextZone : undefined; return { ...t, zone: z }; })); };
+      const fmtDeadline = (d) => { if (!d) return ''; try { const dt = new Date(d); if (isNaN(dt.getTime())) return String(d); const mm = String(dt.getMonth() + 1).padStart(2, '0'); const dd = String(dt.getDate()).padStart(2, '0'); return `${dt.getFullYear()}/${mm}/${dd}`; } catch (e) { return String(d); } };
+      const FZCard = ({ task, zone }) => {
+        if (!task) return null;
+        const text = task.text || '(未命名任務)'; const category = task.category || ''; const deadline = task.deadline ? fmtDeadline(task.deadline) : '';
+        return (
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex flex-col gap-3">
+            <p className="text-sm font-medium text-slate-800 break-words leading-relaxed">{text}</p>
+            {(category || deadline) && (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                {category && (<span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-100">{category}</span>)}
+                {deadline && (<span className="inline-flex items-center gap-1 text-slate-500"><Clock size={12} />{deadline}</span>)}
+              </div>
+            )}
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {zone !== 'focus' && (<button type="button" onClick={() => moveTo(task.id, 'focus')} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"><Zap size={12} />集中</button>)}
+              {zone !== 'hold' && (<button type="button" onClick={() => moveTo(task.id, 'hold')} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"><PauseCircle size={12} />暫緩</button>)}
+              {zone !== 'none' && (<button type="button" onClick={() => moveTo(task.id, undefined)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"><X size={12} />移除</button>)}
+            </div>
+          </div>
+        );
+      };
+      const Column = ({ zoneKey, title, icon, items, accent }) => {
+        const styles = accent ? { wrap: 'bg-indigo-50/60 border-indigo-300', head: 'text-indigo-700', badge: 'bg-indigo-600 text-white', iconWrap: 'bg-indigo-100 text-indigo-600' } : { wrap: 'bg-white border-slate-200', head: 'text-slate-700', badge: 'bg-slate-200 text-slate-600', iconWrap: 'bg-slate-100 text-slate-500' };
+        const Icon = icon;
+        return (
+          <div className={`rounded-3xl border shadow-sm flex flex-col ${styles.wrap}`}>
+            <div className="flex items-center justify-between px-4 pt-4 pb-3">
+              <div className="flex items-center gap-2"><span className={`inline-flex items-center justify-center w-7 h-7 rounded-full ${styles.iconWrap}`}><Icon size={16} /></span><span className={`text-sm font-semibold ${styles.head}`}>{title}</span></div>
+              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${styles.badge}`}>{items.length}</span>
+            </div>
+            <div className="px-3 pb-3 flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: '60vh' }}>
+              {items.length === 0 ? (<div className="text-center text-xs text-slate-400 py-8 px-2">{accent ? '把今天要專心做的任務放進來' : zoneKey === 'hold' ? '沒有暫緩中的任務' : '沒有未指定的任務'}</div>) : (items.map((t) => <FZCard key={t.id} task={t} zone={zoneKey} />))}
+            </div>
+          </div>
+        );
+      };
+      return (
+        <div className="w-full animate-in fade-in duration-300">
+          <div className="flex items-start gap-2 mb-4 px-1"><Plus size={16} className="text-indigo-500 mt-0.5 shrink-0" /><p className="text-sm text-slate-600">把今天要專心做的放進「今日集中」，先擱著的放「暫緩」（點卡片上的按鈕移動即可）。</p></div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            <Column zoneKey="focus" title="今日集中" icon={Zap} items={focusTasks} accent />
+            <Column zoneKey="hold" title="暫緩" icon={PauseCircle} items={holdTasks} accent={false} />
+            <Column zoneKey="none" title="未指定" icon={CheckCircle} items={noneTasks} accent={false} />
           </div>
         </div>
       );
@@ -1702,6 +1852,7 @@
                  <div className="text-[10px] font-black text-slate-500 mb-2 px-2 tracking-widest uppercase">主要功能 MAIN</div>
                  {[
                    { id: 'board', icon: LayoutDashboard, label: '看板模式' },
+                   { id: 'focus', icon: Zap, label: '工作台' },
                    { id: 'sheet', icon: ListIcon, label: '任務總表' },
                    { id: 'planner', icon: Calendar, label: '每日/週計劃' },
                    { id: 'dedup', icon: Copy, label: '找重複' },
@@ -1710,6 +1861,7 @@
                    { id: 'kb', icon: BookOpen, label: '知識管理' },
                    { id: 'stats', icon: BarChart2, label: '統計報表' },
                    { id: 'ceo', icon: TrendingUp, label: 'CEO 儀表板' },
+                   { id: 'done', icon: CheckCircle, label: '已完成' },
                    { id: 'settings', icon: Settings, label: '系統設定' },
                    { id: 'guide', icon: Info, label: '系統說明' }
                  ].map(item => (
@@ -1767,6 +1919,8 @@
                     {activeView === 'sheet' && '任務總表'}
                     {activeView === 'planner' && '每日/週計劃'}
                     {activeView === 'dedup' && '找重複任務'}
+                    {activeView === 'focus' && '工作台（集中／暫緩）'}
+                    {activeView === 'done' && '已完成任務'}
                     {activeView === 'notes' && '隨手筆記'}
                     {activeView === 'report' && '匯報清單 (One-on-One)'}
                     {activeView === 'stats' && '統計報表'}
@@ -1807,6 +1961,8 @@
                 {activeView === 'sheet' && renderSheet()}
                 {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} />}
                 {activeView === 'dedup' && <DuplicateFinder tasks={tasks} setTasks={setTasks} />}
+                {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} />}
+                {activeView === 'done' && <CompletedTasks tasks={tasks} projects={projects} />}
                 {activeView === 'notes' && renderNotes()}
                 {activeView === 'report' && renderReport()}
                 {activeView === 'stats' && renderStats()}
