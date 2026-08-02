@@ -156,6 +156,7 @@
       
       const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
       const [manualMins, setManualMins] = useState('');
+      const [manualNote, setManualNote] = useState('');
 
       const titleRef = useRef(null);
       const noteRef = useRef(null);
@@ -216,10 +217,13 @@
 
             <div className="mt-2 flex flex-col gap-2 pt-3 border-t border-slate-100">
               <div className="text-xs font-bold text-slate-400 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> 投入歷程與補登</div>
-              <div className="flex items-center gap-2 w-full">
+              <div className="flex flex-col gap-2 w-full">
+                <div className="flex items-center gap-2 w-full">
                  <input type="date" className="flex-1 bg-slate-50 border border-slate-200 text-slate-600 text-xs font-bold px-2 py-1.5 rounded-lg outline-none cursor-pointer" value={manualDate} onChange={e => setManualDate(e.target.value)} onClick={stopDrag} onDragStart={stopDragAndDrop} />
                  <input type="number" placeholder="分鐘" className="w-[60px] bg-slate-50 border border-slate-200 text-slate-600 text-xs font-bold px-2 py-1.5 rounded-lg outline-none" value={manualMins} onChange={e => setManualMins(e.target.value)} onClick={stopDrag} onDragStart={stopDragAndDrop} />
-                 <button onClick={(e) => { e.stopPropagation(); addManualLog(task.id, manualDate, manualMins); setManualMins(''); }} onDragStart={stopDragAndDrop} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors shrink-0 shadow-sm">+ 補登</button>
+                 <button onClick={(e) => { e.stopPropagation(); addManualLog(task.id, manualDate, manualMins, manualNote); setManualMins(''); setManualNote(''); }} onDragStart={stopDragAndDrop} className="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors shrink-0 shadow-sm">+ 補登</button>
+                </div>
+                <input type="text" placeholder="這段時間做了什麼？(選填備註)" className="w-full bg-slate-50 border border-slate-200 text-slate-600 text-xs font-bold px-2 py-1.5 rounded-lg outline-none" value={manualNote} onChange={e => setManualNote(e.target.value)} onClick={stopDrag} onDragStart={stopDragAndDrop} />
               </div>
 
               <div className="flex flex-col gap-1 mt-1 max-h-[140px] overflow-y-auto custom-scrollbar pr-1">
@@ -232,7 +236,7 @@
                    const dateLabel = isNaN(dateObj) ? '未知時間' : dateObj.toLocaleString('zh-TW', { month:'numeric', day:'numeric', hour:'numeric', minute:'2-digit' });
                    return (
                      <div key={log.id || idx} className={`text-[11px] font-bold px-2 py-1.5 rounded-lg flex justify-between items-center group/log ${isCurrent ? 'bg-indigo-50 text-indigo-700 border border-indigo-100 animate-pulse' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 transition-colors'}`}>
-                       <span className="truncate">{dateLabel} {log.manual ? '(補)' : ''}</span>
+                       <span className="truncate" title={log.note || ''}>{dateLabel} {log.manual ? '(補)' : ''}{log.note ? ` · ${log.note}` : ''}</span>
                        <div className="flex items-center gap-2">
                          <span className={isCurrent ? 'text-indigo-600 font-black' : 'text-indigo-500'}>+{dur}m</span>
                          {!isCurrent && (
@@ -556,7 +560,7 @@
         });
       }, [activeTimer]);
 
-      const addManualLog = useCallback((taskId, dateStr, durationStr) => {
+      const addManualLog = useCallback((taskId, dateStr, durationStr, noteStr) => {
         const mins = parseInt(durationStr, 10);
         if (isNaN(mins) || mins <= 0) return;
         const logDate = new Date(dateStr);
@@ -564,7 +568,7 @@
         logDate.setHours(now.getHours(), now.getMinutes());
         setTasks(prev => prev.map(t => {
           if (t.id === taskId) {
-            const newLog = { id: Date.now().toString(), start: logDate.toISOString(), end: logDate.toISOString(), duration: mins, manual: true };
+            const newLog = { id: Date.now().toString(), start: logDate.toISOString(), end: logDate.toISOString(), duration: mins, manual: true, note: (noteStr || '').trim() };
             const updatedLogs = [...(t.logs || []), newLog];
             const total = updatedLogs.reduce((acc, log) => acc + (isNaN(Number(log.duration)) ? 0 : Number(log.duration)), 0);
             return { ...t, logs: updatedLogs, timeSpent: total };
