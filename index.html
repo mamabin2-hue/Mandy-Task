@@ -505,6 +505,122 @@
       );
     };
 
+    // 每日/週計劃（唯讀視圖，內部 UI 狀態，不寫外部資料；平行 Agent 產出，整合時已回歸測試）
+    const WeekPlanner = ({ tasks, projects, onOpenDay }) => {
+      const [mode, setMode] = React.useState('week');
+      const [weekOffset, setWeekOffset] = React.useState(0);
+      const [dayOffset, setDayOffset] = React.useState(0);
+      const WD = ['日', '一', '二', '三', '四', '五', '六'];
+      const PERIODS = ['上午', '下午', '晚上/下班', '不指定時段'];
+      const safeTasks = Array.isArray(tasks) ? tasks : [];
+      const safeProjects = Array.isArray(projects) ? projects : [];
+      const parseDeadline = (s) => { if (!s || typeof s !== 'string') return null; const d = new Date(s + 'T00:00:00'); return isNaN(d.getTime()) ? null : d; };
+      const dayKey = (d) => (d instanceof Date && !isNaN(d.getTime())) ? `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}` : null;
+      const fmtMD = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+      const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+      const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+      const today = startOfDay(new Date());
+      const todayKey = dayKey(today);
+      const thisSaturday = addDays(today, -((today.getDay() + 1) % 7));
+      const weekStart = addDays(thisSaturday, weekOffset * 7);
+      const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+      const colorOf = (cat) => { if (!cat) return '#6366f1'; const p = safeProjects.find((x) => x && (x.id === cat || x.name === cat)); return (p && p.color) ? p.color : '#6366f1'; };
+      const StatusIcon = ({ status }) => { if (status === 'done') return <CheckCircle size={12} className="text-emerald-500 shrink-0" />; if (status === 'in-progress') return <Play size={12} className="text-amber-500 shrink-0" />; return <Square size={12} className="text-slate-400 shrink-0" />; };
+      const statusText = (s) => s === 'done' ? '完成' : s === 'in-progress' ? '進行中' : '待辦';
+      const byDay = {};
+      safeTasks.forEach((t) => { if (!t) return; const d = parseDeadline(t.deadline); const k = dayKey(d); if (!k) return; (byDay[k] = byDay[k] || []).push(t); });
+      const tasksOnDay = (d) => byDay[dayKey(d)] || [];
+      const weekTotal = weekDays.reduce((n, d) => n + tasksOnDay(d).length, 0);
+      const PTaskCard = ({ t }) => (
+        <div className="flex items-start gap-1.5 px-2 py-1.5 rounded-xl bg-slate-50 hover:bg-indigo-50 border border-slate-100 transition-colors">
+          <span className="mt-1 w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorOf(t.category) }} />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-slate-700 truncate">{t.text || '(未命名任務)'}</div>
+            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-400">
+              <StatusIcon status={t.status} />
+              <span className="truncate">{(t.period && t.period !== '不指定時段') ? t.period : statusText(t.status)}</span>
+            </div>
+          </div>
+        </div>
+      );
+      const navBtn = "p-1.5 rounded-xl border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors";
+      const modeBtn = (active) => `px-3 py-1.5 text-xs font-medium rounded-xl transition-colors ${active ? 'bg-indigo-600 text-white' : 'text-slate-500 hover:bg-slate-100'}`;
+      const WeekView = () => (
+        <div>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <button className={navBtn} onClick={() => setWeekOffset((v) => v - 1)} aria-label="上一週"><ChevronDown size={16} className="rotate-90" /></button>
+              <button className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50" onClick={() => setWeekOffset(0)}>本週</button>
+              <button className={navBtn} onClick={() => setWeekOffset((v) => v + 1)} aria-label="下一週"><ChevronDown size={16} className="-rotate-90" /></button>
+              <span className="text-xs text-slate-500 ml-1">{fmtMD(weekDays[0])} ~ {fmtMD(weekDays[6])}</span>
+            </div>
+            <span className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-xl font-medium">本週合計 {weekTotal} 件到期</span>
+          </div>
+          <div className="overflow-x-auto -mx-1 px-1">
+            <div className="grid grid-cols-7 gap-2 min-w-[720px]">
+              {weekDays.map((d, i) => {
+                const list = tasksOnDay(d);
+                const isToday = dayKey(d) === todayKey;
+                return (
+                  <div key={i} className={`rounded-2xl border p-2 flex flex-col ${isToday ? 'border-indigo-300 bg-indigo-50/40' : 'border-slate-200 bg-slate-50/40'}`}>
+                    <div className={`text-center pb-2 mb-2 border-b ${isToday ? 'border-indigo-200' : 'border-slate-200'}`}>
+                      <div className={`text-[11px] ${isToday ? 'text-indigo-500 font-semibold' : 'text-slate-400'}`}>週{WD[d.getDay()]}</div>
+                      <div className={`text-sm font-bold ${isToday ? 'text-indigo-600' : 'text-slate-600'}`}>{fmtMD(d)}</div>
+                    </div>
+                    <div className="space-y-1.5 overflow-y-auto max-h-[300px] pr-0.5">
+                      {list.length === 0 ? <div className="text-center text-[10px] text-slate-300 py-4">無到期</div> : list.map((t, j) => <PTaskCard key={t.id || j} t={t} />)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+      const DayView = () => {
+        const day = addDays(today, dayOffset);
+        const isToday = dayOffset === 0;
+        const list = tasksOnDay(day);
+        const grouped = PERIODS.map((p) => ({ period: p, items: list.filter((t) => { const per = (t && t.period) || '不指定時段'; return per === p; }) }));
+        return (
+          <div>
+            <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <button className={navBtn} onClick={() => setDayOffset((v) => v - 1)} aria-label="前一天"><ChevronDown size={16} className="rotate-90" /></button>
+                <button className="px-3 py-1.5 text-xs font-medium rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50" onClick={() => setDayOffset(0)}>今天</button>
+                <button className={navBtn} onClick={() => setDayOffset((v) => v + 1)} aria-label="後一天"><ChevronDown size={16} className="-rotate-90" /></button>
+                <span className={`text-sm font-bold ml-1 ${isToday ? 'text-indigo-600' : 'text-slate-600'}`}>{fmtMD(day)}（週{WD[day.getDay()]}）{isToday && <span className="text-[11px] font-medium text-indigo-400 ml-1">今天</span>}</span>
+              </div>
+              <span className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-xl font-medium">共 {list.length} 件到期</span>
+            </div>
+            <p className="text-xs text-slate-500 mb-3 flex items-center gap-1.5"><Clock size={13} className="text-indigo-400" />{isToday ? '今天預計要完成的事：' : '這天預計要完成的事：'}</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              {grouped.map((g, i) => (
+                <div key={i} className="rounded-2xl border border-slate-200 bg-slate-50/40 p-3">
+                  <div className="text-xs font-semibold text-slate-500 mb-2 flex items-center justify-between"><span>{g.period}</span><span className="text-[10px] text-slate-400">{g.items.length} 件</span></div>
+                  <div className="space-y-1.5 overflow-y-auto max-h-[220px] pr-0.5">
+                    {g.items.length === 0 ? <div className="text-center text-[10px] text-slate-300 py-3">無安排</div> : g.items.map((t, j) => <PTaskCard key={t.id || j} t={t} />)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      };
+      return (
+        <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 sm:p-6 animate-in fade-in duration-300">
+          <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2"><Calendar size={20} className="text-indigo-500" /> 每日/週計劃</h2>
+            <div className="flex items-center gap-1 bg-slate-100 rounded-2xl p-1">
+              <button className={modeBtn(mode === 'week')} onClick={() => setMode('week')}>週檢視</button>
+              <button className={modeBtn(mode === 'day')} onClick={() => setMode('day')}>當日檢視</button>
+            </div>
+          </div>
+          {mode === 'week' ? <WeekView /> : <DayView />}
+        </div>
+      );
+    };
+
     function TaskManager({ uid, userEmail }) {
       const [activeView, setActiveView] = useState('board');
       const [searchQuery, setSearchQuery] = useState('');
@@ -1369,6 +1485,7 @@
                  {[
                    { id: 'board', icon: LayoutDashboard, label: '看板模式' },
                    { id: 'sheet', icon: ListIcon, label: '任務總表' },
+                   { id: 'planner', icon: Calendar, label: '每日/週計劃' },
                    { id: 'notes', icon: PenSquare, label: '隨手筆記' },
                    { id: 'report', icon: MessageSquare, label: '匯報清單' },
                    { id: 'stats', icon: BarChart2, label: '統計報表' },
@@ -1428,6 +1545,7 @@
                   <h1 className="text-2xl font-black text-slate-800 tracking-tight hidden sm:block">
                     {activeView === 'board' && (filterProject !== 'ALL' ? filterProject : filterType === 'work' ? '所有工作專案' : filterType === 'uncat' ? '未分類任務' : filterType === 'life' ? '生活個人' : '所有任務')}
                     {activeView === 'sheet' && '任務總表'}
+                    {activeView === 'planner' && '每日/週計劃'}
                     {activeView === 'notes' && '隨手筆記'}
                     {activeView === 'report' && '匯報清單 (One-on-One)'}
                     {activeView === 'stats' && '統計報表'}
@@ -1465,6 +1583,7 @@
              <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 w-full relative">
                 {activeView === 'board' && renderBoard()}
                 {activeView === 'sheet' && renderSheet()}
+                {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} />}
                 {activeView === 'notes' && renderNotes()}
                 {activeView === 'report' && renderReport()}
                 {activeView === 'stats' && renderStats()}
