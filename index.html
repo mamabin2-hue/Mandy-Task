@@ -250,7 +250,7 @@
             </div>
           </div>
 
-          <div className="p-3 bg-slate-50/80 border-t border-slate-100 flex items-center justify-between gap-3 rounded-b-xl">
+          <div className="p-3 bg-slate-50/80 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 rounded-b-xl">
              {task.status === 'done' ? (
                 <div className="flex items-center gap-1.5 text-emerald-600 font-black text-sm px-3 py-2 bg-emerald-100/50 rounded-xl flex-1 justify-center border border-emerald-100 cursor-pointer hover:bg-emerald-200/50 transition-colors shadow-sm" onClick={(e)=>{ e.stopPropagation(); toggleStatus(task.id, 'todo'); }} title="點擊退回待辦">
                   <CheckCircle className="w-4 h-4" /> 已完成結案
@@ -1677,12 +1677,12 @@
                </div>
                <div className="w-full xl:w-[40%] flex flex-col gap-6">
                    {[
-                     { title: '進行中工作明細', icon: Play, data: inProgressList, color: 'blue' },
-                     { title: '已完成工作明細', icon: CheckCircle, data: completedList, color: 'emerald' }
+                     { title: '進行中工作明細', icon: Play, data: inProgressList, color: 'blue', border: 'border-blue-200', bar: 'bg-blue-500', head: 'text-blue-800', ico: 'text-blue-500' },
+                     { title: '已完成工作明細', icon: CheckCircle, data: completedList, color: 'emerald', border: 'border-emerald-200', bar: 'bg-emerald-500', head: 'text-emerald-800', ico: 'text-emerald-500' }
                    ].map(list => (
-                     <div key={list.title} className={`bg-white p-6 rounded-3xl border border-${list.color}-200 shadow-sm flex flex-col w-full relative overflow-hidden flex-1 min-h-[263px]`}>
-                       <div className={`absolute top-0 left-0 w-full h-1.5 bg-${list.color}-500`} />
-                       <h3 className={`text-lg font-black text-${list.color}-800 mb-6 flex items-center gap-2`}><list.icon className={`w-5 h-5 text-${list.color}-500 ${list.icon===Play?'fill-current':''}`} /> {list.title}</h3>
+                     <div key={list.title} className={`bg-white p-6 rounded-3xl border ${list.border} shadow-sm flex flex-col w-full relative overflow-hidden flex-1 min-h-[263px]`}>
+                       <div className={`absolute top-0 left-0 w-full h-1.5 ${list.bar}`} />
+                       <h3 className={`text-lg font-black ${list.head} mb-6 flex items-center gap-2`}><list.icon className={`w-5 h-5 ${list.ico} ${list.icon===Play?'fill-current':''}`} /> {list.title}</h3>
                        <div className="w-full overflow-x-auto custom-scrollbar">
                          <table className="w-full text-left text-sm whitespace-nowrap">
                             <thead>
@@ -1940,18 +1940,18 @@
                   </div>
                   )}
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 shrink-0">
                    {syncStatus === 'saving' ? (
-                      <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-4 py-2 rounded-full text-sm font-bold border border-indigo-100 shadow-sm">
-                         <Clock className="w-4 h-4 animate-spin" /> 儲存中…
+                      <div className="flex items-center gap-2 text-indigo-600 bg-indigo-50 px-3 sm:px-4 py-2 rounded-full text-sm font-bold border border-indigo-100 shadow-sm shrink-0" title="儲存中">
+                         <Clock className="w-4 h-4 animate-spin shrink-0" /> <span className="hidden sm:inline">儲存中…</span>
                       </div>
                    ) : syncStatus === 'error' ? (
-                      <div className="flex items-center gap-2 text-rose-600 bg-rose-50 px-4 py-2 rounded-full text-sm font-bold border border-rose-100 shadow-sm" title="與雲端同步失敗，請檢查網路連線">
-                         <Info className="w-4 h-4" /> 未同步 · 檢查網路
+                      <div className="flex items-center gap-2 text-rose-600 bg-rose-50 px-3 sm:px-4 py-2 rounded-full text-sm font-bold border border-rose-100 shadow-sm shrink-0" title="與雲端同步失敗，請檢查網路連線">
+                         <Info className="w-4 h-4 shrink-0" /> <span className="hidden sm:inline">未同步 · 檢查網路</span>
                       </div>
                    ) : (
-                      <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-4 py-2 rounded-full text-sm font-bold border border-emerald-100 shadow-sm">
-                         <CheckCircle className="w-4 h-4" /> 已同步雲端
+                      <div className="flex items-center gap-2 text-emerald-600 bg-emerald-50 px-3 sm:px-4 py-2 rounded-full text-sm font-bold border border-emerald-100 shadow-sm shrink-0" title="已同步雲端">
+                         <CheckCircle className="w-4 h-4 shrink-0" /> <span className="hidden sm:inline">已同步雲端</span>
                       </div>
                    )}
                 </div>
