@@ -46,7 +46,7 @@
       LayoutDashboard, List as ListIcon, PenSquare, MessageSquare, BarChart2, 
       Settings, BookOpen, Plus, Search, Filter, Calendar, Clock, User, 
       Trash2, Edit2, Play, Square, CheckCircle, ChevronDown, PieChart as PieChartIcon, 
-      AlignLeft, Download, Upload, Info, X, Check, FileText 
+      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
@@ -336,6 +336,172 @@
             </g>
           ))}
         </svg>
+      );
+    };
+
+    // CEO 進度儀表板（純呈現元件，無狀態；由平行 Agent 產出、整合時已回歸測試）
+    const CeoDashboard = ({ tasks, projects }) => {
+      const T = Array.isArray(tasks) ? tasks : [];
+      const P = Array.isArray(projects) ? projects : [];
+      const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+      const safeDate = (v) => { if (!v) return null; const d = new Date(v); return isNaN(d.getTime()) ? null : d; };
+      const startOfDay = (d) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const fmtHours = (min) => { const h = num(min) / 60; return (Math.round(h * 10) / 10).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 }); };
+      const fmtMD = (d) => `${d.getMonth() + 1}/${d.getDate()}`;
+      const now = new Date();
+      const today0 = startOfDay(now);
+      const weekStart = startOfDay(new Date(today0));
+      weekStart.setDate(weekStart.getDate() - ((now.getDay() + 1) % 7));
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 7);
+      const total = T.length;
+      const doneCount = T.filter((t) => t && t.status === 'done').length;
+      const inProgCount = T.filter((t) => t && t.status === 'in-progress').length;
+      const todoCount = T.filter((t) => t && t.status === 'todo').length;
+      const completeRate = total ? Math.round((doneCount / total) * 100) : 0;
+      const isOverdue = (t) => { if (!t || t.status === 'done') return false; const dl = safeDate(t.deadline); return dl ? startOfDay(dl) < today0 : false; };
+      const overdueCount = T.filter(isOverdue).length;
+      let weekMinutes = 0;
+      T.forEach((t) => { const logs = t && Array.isArray(t.logs) ? t.logs : []; logs.forEach((lg) => { const s = safeDate(lg && lg.start); if (s && s >= weekStart && s < weekEnd) weekMinutes += num(lg.duration); }); });
+      const projStats = P.map((p) => { const name = (p && p.name) || ''; const ts = T.filter((t) => t && t.category === name); const dn = ts.filter((t) => t.status === 'done').length; return { id: (p && p.id) != null ? p.id : name, name, color: (p && p.color) || '#6366f1', tot: ts.length, done: dn, pct: ts.length ? Math.round((dn / ts.length) * 100) : 0 }; }).filter((x) => x.tot > 0).sort((a, b) => b.tot - a.tot);
+      const soonLimit = new Date(today0); soonLimit.setDate(soonLimit.getDate() + 3);
+      const dueList = T.filter((t) => { if (!t || t.status === 'done') return false; const dl = safeDate(t.deadline); if (!dl) return false; return startOfDay(dl) <= soonLimit; }).map((t) => { const dl = startOfDay(safeDate(t.deadline)); const diffDays = Math.round((dl - today0) / 86400000); return { t, dl, diffDays }; }).sort((a, b) => a.diffDays - b.diffDays);
+      const days = [];
+      for (let i = 6; i >= 0; i--) { const d = new Date(today0); d.setDate(d.getDate() - i); days.push({ date: d, key: dayKey(d), min: 0 }); }
+      const dayMap = {}; days.forEach((d) => (dayMap[d.key] = d));
+      T.forEach((t) => { const logs = t && Array.isArray(t.logs) ? t.logs : []; logs.forEach((lg) => { const s = safeDate(lg && lg.start); if (!s) return; const k = dayKey(startOfDay(s)); if (dayMap[k]) dayMap[k].min += num(lg.duration); }); });
+      const maxDayMin = Math.max(1, ...days.map((d) => d.min));
+
+      const CARD = 'bg-white rounded-3xl border border-slate-200 shadow-sm';
+      const Empty = ({ text }) => (<div className="flex items-center justify-center h-full min-h-[120px] text-slate-400 text-sm font-bold">{text || '本區間無資料'}</div>);
+      const KpiCard = ({ Icon, label, value, sub, tone }) => (
+        <div className={`${CARD} p-4 flex flex-col gap-2`}>
+          <div className="flex items-center gap-2 text-slate-500">
+            <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${tone || 'bg-indigo-50 text-indigo-600'}`}><Icon className="w-4 h-4" /></div>
+            <span className="text-xs font-bold">{label}</span>
+          </div>
+          <div className="text-2xl font-black text-slate-800 leading-none">{value}</div>
+          {sub ? <div className="text-[11px] font-bold text-slate-400">{sub}</div> : null}
+        </div>
+      );
+      const StatusDonut = () => {
+        const segs = [ { name: '待辦', value: todoCount, color: '#94a3b8' }, { name: '進行中', value: inProgCount, color: '#6366f1' }, { name: '已完成', value: doneCount, color: '#22c55e' } ].filter((s) => s.value > 0);
+        const sum = segs.reduce((a, s) => a + s.value, 0);
+        if (!sum) return <Empty text="尚無任務" />;
+        const cx = 90, cy = 90, rOut = 78, rIn = 50;
+        const polar = (r, a) => [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+        let body;
+        if (segs.length === 1) { const s0 = segs[0]; body = (<circle cx={cx} cy={cy} r={(rOut + rIn) / 2} fill="none" stroke={s0.color} strokeWidth={rOut - rIn} />); }
+        else {
+          let angle = -Math.PI / 2; const gap = 0.04;
+          body = segs.map((s, i) => {
+            const frac = s.value / sum; const sweep = frac * Math.PI * 2; const useGap = sweep > gap * 1.5 ? gap : 0;
+            const a0 = angle + useGap / 2, a1 = angle + sweep - useGap / 2; angle += sweep;
+            const [ox0, oy0] = polar(rOut, a0); const [ox1, oy1] = polar(rOut, a1); const [ix1, iy1] = polar(rIn, a1); const [ix0, iy0] = polar(rIn, a0);
+            const large = (a1 - a0) > Math.PI ? 1 : 0;
+            const d = `M ${ox0} ${oy0} A ${rOut} ${rOut} 0 ${large} 1 ${ox1} ${oy1} L ${ix1} ${iy1} A ${rIn} ${rIn} 0 ${large} 0 ${ix0} ${iy0} Z`;
+            return (<path key={i} d={d} fill={s.color}><title>{`${s.name}：${s.value} (${Math.round(frac * 100)}%)`}</title></path>);
+          });
+        }
+        return (
+          <div className="flex flex-col sm:flex-row items-center gap-4">
+            <svg viewBox="0 0 180 180" className="w-40 h-40 shrink-0">
+              {body}
+              <text x={cx} y={cy - 6} textAnchor="middle" fontSize="26" fontWeight="900" fill="#1e293b">{completeRate}%</text>
+              <text x={cx} y={cy + 16} textAnchor="middle" fontSize="11" fontWeight="700" fill="#94a3b8">完成率</text>
+            </svg>
+            <div className="flex flex-col gap-2 w-full">
+              {[ { name: '待辦', value: todoCount, color: '#94a3b8' }, { name: '進行中', value: inProgCount, color: '#6366f1' }, { name: '已完成', value: doneCount, color: '#22c55e' } ].map((s, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm">
+                  <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                  <span className="font-bold text-slate-600 flex-1">{s.name}</span>
+                  <span className="font-black text-slate-800">{s.value}</span>
+                  <span className="text-slate-400 font-bold w-12 text-right">{sum ? Math.round((s.value / sum) * 100) : 0}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      };
+      const TrendBars = () => {
+        if (days.every((d) => d.min <= 0)) return <Empty text="近 7 天尚無投入紀錄" />;
+        const W = 420, H = 160, padB = 26, padT = 10, padX = 8; const n = days.length; const bw = (W - padX * 2) / n;
+        return (
+          <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-44" preserveAspectRatio="xMidYMid meet">
+            {days.map((d, i) => {
+              const h = (d.min / maxDayMin) * (H - padB - padT); const x = padX + i * bw; const y = H - padB - h; const isToday = d.key === dayKey(today0);
+              return (
+                <g key={i}>
+                  <rect x={x + bw * 0.18} y={y} width={bw * 0.64} height={Math.max(0, h)} rx="5" fill={isToday ? '#4f46e5' : '#a5b4fc'}><title>{`${fmtMD(d.date)}：${fmtHours(d.min)} 小時`}</title></rect>
+                  {d.min > 0 && (<text x={x + bw / 2} y={y - 4} textAnchor="middle" fontSize="10" fontWeight="800" fill="#6366f1">{fmtHours(d.min)}</text>)}
+                  <text x={x + bw / 2} y={H - padB + 16} textAnchor="middle" fontSize="10" fontWeight="700" fill={isToday ? '#4f46e5' : '#94a3b8'}>{fmtMD(d.date)}</text>
+                </g>
+              );
+            })}
+          </svg>
+        );
+      };
+      return (
+        <div className="w-full max-w-full space-y-5 animate-in fade-in duration-300 pb-12">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+            <KpiCard Icon={BarChart2} label="總任務數" value={total} sub="全部任務" />
+            <KpiCard Icon={CheckCircle} label="完成率" value={`${completeRate}%`} sub={`${doneCount} / ${total} 完成`} tone="bg-green-50 text-green-600" />
+            <KpiCard Icon={Clock} label="進行中" value={inProgCount} sub="in-progress" tone="bg-indigo-50 text-indigo-600" />
+            <KpiCard Icon={AlertTriangle} label="逾期" value={overdueCount} sub="已過期未完成" tone={overdueCount ? 'bg-red-50 text-red-600' : 'bg-slate-100 text-slate-500'} />
+            <KpiCard Icon={TrendingUp} label="本週投入" value={`${fmtHours(weekMinutes)}h`} sub={`${fmtMD(weekStart)}~${fmtMD(new Date(weekEnd - 86400000))}`} tone="bg-sky-50 text-sky-600" />
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+            <div className={`${CARD} p-5 lg:col-span-2`}>
+              <h3 className="text-base font-black text-slate-800 mb-4 flex items-center gap-2"><BarChart2 className="w-5 h-5 text-indigo-600" /> 各專案完成率</h3>
+              {projStats.length === 0 ? <Empty text="尚無專案任務" /> : (
+                <div className="space-y-3">
+                  {projStats.map((p) => (
+                    <div key={p.id}>
+                      <div className="flex items-center justify-between text-sm mb-1">
+                        <span className="font-bold text-slate-700 truncate pr-2" style={{ minWidth: 0 }}>{p.name || '（未命名）'}</span>
+                        <span className="font-black text-slate-800 shrink-0">{p.done}/{p.tot}・{p.pct}%</span>
+                      </div>
+                      <div className="w-full h-3 rounded-full bg-slate-100 overflow-hidden">
+                        <div className="h-full rounded-full transition-all" style={{ width: `${p.pct}%`, backgroundColor: p.color }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className={`${CARD} p-5`}>
+              <h3 className="text-base font-black text-slate-800 mb-4 flex items-center gap-2"><PieChartIcon className="w-5 h-5 text-indigo-600" /> 狀態分布</h3>
+              <StatusDonut />
+            </div>
+          </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <div className={`${CARD} p-5`}>
+              <h3 className="text-base font-black text-slate-800 mb-4 flex items-center gap-2"><Calendar className="w-5 h-5 text-indigo-600" /> 逾期與即將到期（3 天內）</h3>
+              {dueList.length === 0 ? <Empty text="太棒了，沒有逾期或即將到期的任務" /> : (
+                <div className="space-y-2 overflow-y-auto max-h-72 pr-1">
+                  {dueList.map(({ t, dl, diffDays }, i) => {
+                    const late = diffDays < 0;
+                    return (
+                      <div key={t.id != null ? t.id : i} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50 border border-slate-100">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${late ? 'bg-red-500' : diffDays === 0 ? 'bg-amber-500' : 'bg-indigo-400'}`} />
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-slate-800 text-sm truncate">{(t && t.text) || '（無標題）'}</div>
+                          <div className="text-[11px] font-bold text-slate-400 truncate">{(t && t.category) || '未分類'}・{fmtMD(dl)}</div>
+                        </div>
+                        <span className={`text-xs font-black shrink-0 px-2 py-1 rounded-lg ${late ? 'bg-red-100 text-red-600' : diffDays === 0 ? 'bg-amber-100 text-amber-600' : 'bg-indigo-100 text-indigo-600'}`}>{late ? `逾期 ${Math.abs(diffDays)} 天` : diffDays === 0 ? '今天到期' : `剩 ${diffDays} 天`}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div className={`${CARD} p-5`}>
+              <h3 className="text-base font-black text-slate-800 mb-4 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-indigo-600" /> 近 7 天每日投入時數</h3>
+              <TrendBars />
+            </div>
+          </div>
+        </div>
       );
     };
 
@@ -1206,6 +1372,7 @@
                    { id: 'notes', icon: PenSquare, label: '隨手筆記' },
                    { id: 'report', icon: MessageSquare, label: '匯報清單' },
                    { id: 'stats', icon: BarChart2, label: '統計報表' },
+                   { id: 'ceo', icon: TrendingUp, label: 'CEO 儀表板' },
                    { id: 'settings', icon: Settings, label: '系統設定' },
                    { id: 'guide', icon: Info, label: '系統說明' }
                  ].map(item => (
@@ -1264,6 +1431,7 @@
                     {activeView === 'notes' && '隨手筆記'}
                     {activeView === 'report' && '匯報清單 (One-on-One)'}
                     {activeView === 'stats' && '統計報表'}
+                    {activeView === 'ceo' && 'CEO 進度儀表板'}
                     {activeView === 'settings' && '系統設定'}
                     {activeView === 'guide' && '📖 系統說明'}
                   </h1>
@@ -1300,6 +1468,7 @@
                 {activeView === 'notes' && renderNotes()}
                 {activeView === 'report' && renderReport()}
                 {activeView === 'stats' && renderStats()}
+                {activeView === 'ceo' && <CeoDashboard tasks={tasks} projects={projects} />}
                 {activeView === 'settings' && renderSettings()}
                 {activeView === 'guide' && renderGuide()}
              </div>
