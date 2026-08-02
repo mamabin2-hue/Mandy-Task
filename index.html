@@ -454,6 +454,11 @@
         return () => clearInterval(interval);
       }, [activeTimer]);
 
+      // 離開「看板／總表」時清空搜尋，避免切回來時任務被舊搜尋條件過濾掉、讓人誤以為任務不見
+      useEffect(() => {
+        if (activeView !== 'board' && activeView !== 'sheet') setSearchQuery('');
+      }, [activeView]);
+
       // 關頁面 / 切換 App / 鎖螢幕前，立即把待寫的最後一筆存回雲端（手機尤其重要）
       useEffect(() => {
         const onHide = () => { try { flushSaveRef.current(); } catch (e) {} };
@@ -611,12 +616,15 @@
 
       if (!isLoaded) return null;
 
-      // 查詢任務：比對標題／備註／負責人／分類（不分大小寫）
+      // 查詢任務：比對標題／備註／負責人／分類／狀態／截止日（不分大小寫）
+      const STATUS_TEXT = { 'todo': '待辦', 'in-progress': '進行中', 'done': '已完成' };
       const matchesSearch = (t) => {
         if (!searchQuery.trim()) return true;
         const q = searchQuery.trim().toLowerCase();
-        return ((t.text||'') + ' ' + (t.note||'') + ' ' + (t.assignee||'') + ' ' + (t.category||'')).toLowerCase().includes(q);
+        const hay = [t.text, t.note, t.assignee, t.category, STATUS_TEXT[t.status], t.deadline].filter(Boolean).join(' ').toLowerCase();
+        return hay.includes(q);
       };
+      const searching = searchQuery.trim().length > 0;
 
       const renderBoard = () => {
         let filtered = tasks;
@@ -629,15 +637,18 @@
 
         filtered = filtered.filter(matchesSearch);
 
-        const now = new Date();
-        filtered = filtered.filter(t => {
-           if (t.status === 'done') {
-              let lastTime = new Date(t.createdAt);
-              if (t.logs && t.logs.length > 0 && t.logs[t.logs.length - 1].end) lastTime = new Date(t.logs[t.logs.length - 1].end);
-              return ((now - lastTime) / (1000 * 60 * 60 * 24)) <= 7;
-           }
-           return true;
-        });
+        // 一般檢視時，完成超過 7 天的任務自動隱藏；但「搜尋中」是主動查找 → 不隱藏，才找得到舊的已完成任務
+        if (!searching) {
+          const now = new Date();
+          filtered = filtered.filter(t => {
+             if (t.status === 'done') {
+                let lastTime = new Date(t.createdAt);
+                if (t.logs && t.logs.length > 0 && t.logs[t.logs.length - 1].end) lastTime = new Date(t.logs[t.logs.length - 1].end);
+                return ((now - lastTime) / (1000 * 60 * 60 * 24)) <= 7;
+             }
+             return true;
+          });
+        }
 
         return (
           <div className="flex flex-col w-full h-full animate-in fade-in duration-300">
@@ -674,6 +685,12 @@
                  </div>
               </div>
             </div>
+            {searching && filtered.length === 0 && (
+              <div className="mb-6 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 flex items-center justify-between gap-4">
+                <span className="text-sm font-bold text-amber-800">找不到符合「{searchQuery}」的任務——換個關鍵字，或清除搜尋。</span>
+                <button onClick={()=>setSearchQuery('')} className="shrink-0 text-sm font-black text-amber-700 hover:text-amber-900 underline">清除搜尋</button>
+              </div>
+            )}
             <div className="flex flex-col lg:flex-row gap-6 items-start w-full pb-10">
               {[
                 { id: 'todo', title: '待辦', icon: Square, data: filtered.filter(t=>t.status==='todo'), bg: 'bg-slate-50/80 border-slate-200', text: 'text-slate-700', iconColor: 'text-slate-400' },
@@ -691,7 +708,7 @@
                           <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} />
                         </div>
                      ))}
-                     {col.data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">無任務或拖曳至此</div>}
+                     {col.data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">{searching ? '查無符合' : '無任務或拖曳至此'}</div>}
                   </div>
                 </div>
               ))}
@@ -833,6 +850,11 @@
                       <td className="py-4 font-black text-slate-600 text-right pr-4">{isNaN(Number(t.timeSpent))?0:t.timeSpent}</td>
                     </tr>
                   ))}
+                  {tasks.filter(matchesSearch).length === 0 && (
+                    <tr><td colSpan="7" className="py-10 text-center text-slate-400 font-bold">
+                      {searching ? `找不到符合「${searchQuery}」的任務` : '目前沒有任務'}
+                    </td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -1188,8 +1210,8 @@
           </div>
 
           <div className="flex-1 flex flex-col h-full overflow-hidden w-full relative bg-slate-50/50">
-             <div className="h-20 bg-white border-b border-slate-200 flex items-center justify-between px-4 md:px-8 shrink-0 z-10 w-full shadow-sm">
-                <div className="flex items-center gap-4">
+             <div className="h-20 bg-white border-b border-slate-200 flex items-center justify-between gap-2 px-3 md:px-8 shrink-0 z-10 w-full shadow-sm">
+                <div className="flex items-center gap-2 sm:gap-4 min-w-0">
                   <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="w-10 h-10 flex items-center justify-center rounded-xl hover:bg-slate-100 text-slate-500 transition-colors bg-slate-50 border border-slate-200">
                      <AlignLeft className="w-5 h-5" />
                   </button>
@@ -1202,13 +1224,15 @@
                     {activeView === 'settings' && '系統設定'}
                     {activeView === 'guide' && '📖 系統說明'}
                   </h1>
+                  {(activeView === 'board' || activeView === 'sheet') && (
                   <div className="relative block">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
-                      placeholder="搜尋任務…"
-                      className="w-36 sm:w-64 lg:w-80 pl-9 pr-8 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-400 transition-all" />
+                      placeholder="搜尋 任務／人員／專案…"
+                      className="w-44 sm:w-64 lg:w-80 pl-9 pr-8 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-400 transition-all" />
                     {searchQuery && <button onClick={()=>setSearchQuery('')} title="清除搜尋" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4"/></button>}
                   </div>
+                  )}
                 </div>
                 <div className="flex items-center gap-3">
                    {syncStatus === 'saving' ? (
