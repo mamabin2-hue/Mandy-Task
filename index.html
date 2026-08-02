@@ -323,6 +323,7 @@
 
     function TaskManager({ uid, userEmail }) {
       const [activeView, setActiveView] = useState('board');
+      const [searchQuery, setSearchQuery] = useState('');
       const [isSidebarOpen, setIsSidebarOpen] = useState(true);
       const [isLoaded, setIsLoaded] = useState(false);
       
@@ -610,6 +611,13 @@
 
       if (!isLoaded) return null;
 
+      // 查詢任務：比對標題／備註／負責人／分類（不分大小寫）
+      const matchesSearch = (t) => {
+        if (!searchQuery.trim()) return true;
+        const q = searchQuery.trim().toLowerCase();
+        return ((t.text||'') + ' ' + (t.note||'') + ' ' + (t.assignee||'') + ' ' + (t.category||'')).toLowerCase().includes(q);
+      };
+
       const renderBoard = () => {
         let filtered = tasks;
         if (filterType === 'uncat') filtered = filtered.filter(t => t.type === 'uncat' || !t.category);
@@ -618,6 +626,8 @@
             if (filterProject !== 'ALL') filtered = filtered.filter(t => t.category === filterProject);
         }
         if (filterType === 'life') filtered = filtered.filter(t => t.type === 'life');
+
+        filtered = filtered.filter(matchesSearch);
 
         const now = new Date();
         filtered = filtered.filter(t => {
@@ -812,7 +822,7 @@
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {tasks.map(t => (
+                  {tasks.filter(matchesSearch).map(t => (
                     <tr key={t.id} className="hover:bg-slate-50 transition-colors group">
                       <td className="py-4 pl-4">{t.status === 'done' ? <span className="text-emerald-500 font-bold text-xs bg-emerald-50 px-2 py-1 rounded border border-emerald-100">已完成</span> : t.status === 'in-progress' ? <span className="text-indigo-500 font-bold text-xs bg-indigo-50 px-2 py-1 rounded border border-indigo-100">進行中</span> : <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-1 rounded border border-slate-200">待辦</span>}</td>
                       <td className={`py-4 font-bold ${t.status==='done'?'text-slate-400 line-through':'text-slate-700'}`}>{t.text}</td>
@@ -1192,6 +1202,13 @@
                     {activeView === 'settings' && '系統設定'}
                     {activeView === 'guide' && '📖 系統說明'}
                   </h1>
+                  <div className="relative hidden md:block">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
+                      placeholder="搜尋任務（標題／備註／負責人／分類）…"
+                      className="w-64 lg:w-80 pl-9 pr-8 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-400 transition-all" />
+                    {searchQuery && <button onClick={()=>setSearchQuery('')} title="清除搜尋" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4"/></button>}
+                  </div>
                 </div>
                 <div className="flex items-center gap-3">
                    {syncStatus === 'saving' ? (
