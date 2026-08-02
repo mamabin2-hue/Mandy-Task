@@ -46,7 +46,7 @@
       LayoutDashboard, List as ListIcon, PenSquare, MessageSquare, BarChart2, 
       Settings, BookOpen, Plus, Search, Filter, Calendar, Clock, User, 
       Trash2, Edit2, Play, Square, CheckCircle, ChevronDown, PieChart as PieChartIcon, 
-      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp
+      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
@@ -736,6 +736,102 @@
               )}
             </div>
           </main>
+        </div>
+      );
+    };
+
+    // 找重複任務並合併（透過 setTasks 回拋，外層走既有雲端流程。平行 Agent 產出，整合時已回歸測試）
+    const DuplicateFinder = ({ tasks, setTasks }) => {
+      const list = Array.isArray(tasks) ? tasks.filter(t => t && typeof t === 'object') : [];
+      const norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[\s]+/g, '').replace(/[.,;:!?，。、；：！？「」『』（）()\[\]{}<>"'`~@#$%^&*_+=\-\/\\|]/g, '');
+      const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
+      const logCount = (t) => (Array.isArray(t && t.logs) ? t.logs.length : 0);
+      const createdVal = (t) => { const d = new Date(t && t.createdAt).getTime(); return Number.isFinite(d) ? d : Number.MAX_SAFE_INTEGER; };
+      const fmtDate = (v) => { if (!v) return '—'; const d = new Date(v); if (!Number.isFinite(d.getTime())) return String(v); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`; };
+      const statusLabel = (s) => s === 'done' ? '已完成' : s === 'in-progress' ? '進行中' : s === 'todo' ? '待辦' : (s ? String(s) : '—');
+      const statusColor = (s) => s === 'done' ? 'bg-emerald-100 text-emerald-700' : s === 'in-progress' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-600';
+      const exactGroups = React.useMemo(() => {
+        const map = {};
+        list.forEach((t) => { const k = norm(t.text); if (!k) return; (map[k] = map[k] || []).push(t); });
+        return Object.keys(map).map((k) => map[k]).filter((g) => g.length >= 2).map((g) => g.slice().sort((a, b) => createdVal(a) - createdVal(b)));
+      }, [tasks]);
+      const similarPairs = React.useMemo(() => {
+        const pairs = [];
+        for (let i = 0; i < list.length; i++) { for (let j = i + 1; j < list.length; j++) {
+          const a = norm(list[i].text); const b = norm(list[j].text);
+          if (!a || !b || a === b) continue;
+          const shorter = a.length <= b.length ? a : b; const longer = a.length <= b.length ? b : a;
+          if (shorter.length >= 4 && longer.indexOf(shorter) !== -1) pairs.push([list[i], list[j]]);
+        } }
+        return pairs;
+      }, [tasks]);
+      const mergeGroup = (group, sourceArr) => {
+        const sorted = group.slice().sort((a, b) => createdVal(a) - createdVal(b));
+        const main = sorted[0]; const others = sorted.slice(1);
+        const removeIds = new Set(others.map((t) => t && t.id));
+        let mergedLogs = []; sorted.forEach((t) => { if (Array.isArray(t && t.logs)) mergedLogs = mergedLogs.concat(t.logs); });
+        const mergedTime = sorted.reduce((sum, t) => sum + num(t && t.timeSpent), 0);
+        let mergedStatus = 'todo';
+        if (sorted.some((t) => t && t.status === 'done')) mergedStatus = 'done';
+        else if (sorted.some((t) => t && t.status === 'in-progress')) mergedStatus = 'in-progress';
+        let mergedDeadline = main && main.deadline ? main.deadline : ''; let bestDl = Number.MAX_SAFE_INTEGER;
+        sorted.forEach((t) => { const dl = t && t.deadline; if (!dl) return; const d = new Date(dl).getTime(); const v = Number.isFinite(d) ? d : Number.MAX_SAFE_INTEGER; if (v < bestDl) { bestDl = v; mergedDeadline = dl; } });
+        const fillFrom = (field) => { if (main && main[field]) return main[field]; for (let i = 0; i < others.length; i++) { if (others[i] && others[i][field]) return others[i][field]; } return main ? main[field] : undefined; };
+        const mergedMain = Object.assign({}, main, { logs: mergedLogs, timeSpent: mergedTime, status: mergedStatus, deadline: mergedDeadline, note: fillFrom('note'), assignee: fillFrom('assignee'), category: fillFrom('category') });
+        return sourceArr.filter((t) => !(t && removeIds.has(t.id))).map((t) => (t && main && t.id === main.id ? mergedMain : t));
+      };
+      const handleMergeGroup = (group) => { const removeCount = group.length - 1; if (removeCount < 1) return; if (!window.confirm(`確認合併這組？將保留最早建立的 1 筆、刪除其餘 ${removeCount} 筆（logs 與投入時間會併入保留的任務）。`)) return; setTasks(mergeGroup(group, Array.isArray(tasks) ? tasks : [])); };
+      const handleMergeAll = () => { if (!exactGroups.length) return; const totalRemove = exactGroups.reduce((s, g) => s + (g.length - 1), 0); if (!window.confirm(`確認一鍵合併全部 ${exactGroups.length} 組完全重複？總共會刪除 ${totalRemove} 筆重複任務。`)) return; let next = Array.isArray(tasks) ? tasks : []; exactGroups.forEach((g) => { next = mergeGroup(g, next); }); setTasks(next); };
+      const TaskRow = ({ t, isMain }) => (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 rounded-2xl bg-slate-50 border border-slate-100 text-sm">
+          {isMain && (<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium"><Check size={12} /> 保留</span>)}
+          <span className="font-medium text-slate-800 break-words min-w-0">{(t && t.text) || '（無標題）'}</span>
+          <span className={`px-2 py-0.5 rounded-full text-xs ${statusColor(t && t.status)}`}>{statusLabel(t && t.status)}</span>
+          {t && t.category ? <span className="px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 text-xs">{t.category}</span> : null}
+          <span className="text-xs text-slate-500">建立 {fmtDate(t && t.createdAt)}</span>
+          <span className="text-xs text-slate-500">投入 {Math.round(num(t && t.timeSpent))} 分</span>
+          <span className="text-xs text-slate-500">{logCount(t)} 筆 log</span>
+        </div>
+      );
+      const hasDup = exactGroups.length > 0 || similarPairs.length > 0;
+      return (
+        <div className="max-w-3xl mx-auto p-4 space-y-4 animate-in fade-in duration-300">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Copy size={20} className="text-indigo-600" /> 找重複任務並合併</h2>
+              <p className="text-sm text-slate-500 mt-1">完全重複 {exactGroups.length} 組・疑似相似 {similarPairs.length} 組</p>
+            </div>
+            {exactGroups.length > 0 && (<button onClick={handleMergeAll} className="inline-flex items-center gap-2 px-4 py-2 rounded-2xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium shadow-sm transition"><Check size={16} /> 全部完全重複組一鍵合併</button>)}
+          </div>
+          {!hasDup && (<div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-10 text-center"><CheckCircle size={40} className="text-emerald-500 mx-auto mb-3" /><p className="text-slate-600 font-medium">沒有偵測到重複任務 🎉</p><p className="text-sm text-slate-400 mt-1">你的任務清單很乾淨。</p></div>)}
+          <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+            {exactGroups.length > 0 && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><AlertTriangle size={16} className="text-amber-500" /> 完全重複（可合併）</h3>
+                {exactGroups.map((group, gi) => (
+                  <div key={`exact-${gi}`} className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                      <span className="text-sm font-medium text-slate-600">組 {gi + 1}・{group.length} 筆</span>
+                      <button onClick={() => handleMergeGroup(group)} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-sm font-medium transition"><Copy size={14} /> 合併此組</button>
+                    </div>
+                    <div className="space-y-2">{group.map((t, ti) => (<TaskRow key={(t && t.id) || `g${gi}-${ti}`} t={t} isMain={ti === 0} />))}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {similarPairs.length > 0 && (
+              <div className="space-y-3">
+                <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2"><AlertTriangle size={16} className="text-sky-500" /> 疑似相似（僅提示，請人工判斷）</h3>
+                {similarPairs.map((pair, pi) => (
+                  <div key={`sim-${pi}`} className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4">
+                    <div className="text-sm font-medium text-slate-600 mb-3">疑似相似組 {pi + 1}</div>
+                    <div className="space-y-2">{pair.map((t, ti) => (<TaskRow key={(t && t.id) || `p${pi}-${ti}`} t={t} isMain={false} />))}</div>
+                    <p className="text-xs text-slate-400 mt-2">此組不提供自動合併，請自行確認是否為同一任務。</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       );
     };
@@ -1608,6 +1704,7 @@
                    { id: 'board', icon: LayoutDashboard, label: '看板模式' },
                    { id: 'sheet', icon: ListIcon, label: '任務總表' },
                    { id: 'planner', icon: Calendar, label: '每日/週計劃' },
+                   { id: 'dedup', icon: Copy, label: '找重複' },
                    { id: 'notes', icon: PenSquare, label: '隨手筆記' },
                    { id: 'report', icon: MessageSquare, label: '匯報清單' },
                    { id: 'kb', icon: BookOpen, label: '知識管理' },
@@ -1669,6 +1766,7 @@
                     {activeView === 'board' && (filterProject !== 'ALL' ? filterProject : filterType === 'work' ? '所有工作專案' : filterType === 'uncat' ? '未分類任務' : filterType === 'life' ? '生活個人' : '所有任務')}
                     {activeView === 'sheet' && '任務總表'}
                     {activeView === 'planner' && '每日/週計劃'}
+                    {activeView === 'dedup' && '找重複任務'}
                     {activeView === 'notes' && '隨手筆記'}
                     {activeView === 'report' && '匯報清單 (One-on-One)'}
                     {activeView === 'stats' && '統計報表'}
@@ -1708,6 +1806,7 @@
                 {activeView === 'board' && renderBoard()}
                 {activeView === 'sheet' && renderSheet()}
                 {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} />}
+                {activeView === 'dedup' && <DuplicateFinder tasks={tasks} setTasks={setTasks} />}
                 {activeView === 'notes' && renderNotes()}
                 {activeView === 'report' && renderReport()}
                 {activeView === 'stats' && renderStats()}
