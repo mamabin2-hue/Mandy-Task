@@ -640,6 +640,9 @@
       };
       const searching = searchQuery.trim().length > 0;
 
+      // 計時中置頂：正在計時的任務排到欄位最上面（其餘維持原順序，sort 為穩定排序）
+      const orderColumn = (arr) => [...arr].sort((a, b) => (a.id === activeTimer ? -1 : 0) - (b.id === activeTimer ? -1 : 0));
+
       const renderBoard = () => {
         let filtered = tasks;
         if (filterType === 'uncat') filtered = filtered.filter(t => t.type === 'uncat' || !t.category);
@@ -707,9 +710,9 @@
             )}
             <div className="flex flex-col lg:flex-row gap-6 items-start w-full pb-10">
               {[
-                { id: 'todo', title: '待辦', icon: Square, data: filtered.filter(t=>t.status==='todo'), bg: 'bg-slate-50/80 border-slate-200', text: 'text-slate-700', iconColor: 'text-slate-400' },
-                { id: 'in-progress', title: '進行中', icon: Play, data: filtered.filter(t=>t.status==='in-progress'), bg: 'bg-indigo-50/50 border-indigo-100', text: 'text-indigo-800', iconColor: 'text-indigo-500 fill-current' },
-                { id: 'done', title: '已完成', icon: CheckCircle, data: filtered.filter(t=>t.status==='done'), bg: 'bg-emerald-50/50 border-emerald-100 opacity-90', text: 'text-emerald-800', iconColor: 'text-emerald-500' }
+                { id: 'todo', title: '待辦', icon: Square, data: orderColumn(filtered.filter(t=>t.status==='todo')), bg: 'bg-slate-50/80 border-slate-200', text: 'text-slate-700', iconColor: 'text-slate-400' },
+                { id: 'in-progress', title: '進行中', icon: Play, data: orderColumn(filtered.filter(t=>t.status==='in-progress')), bg: 'bg-indigo-50/50 border-indigo-100', text: 'text-indigo-800', iconColor: 'text-indigo-500 fill-current' },
+                { id: 'done', title: '已完成', icon: CheckCircle, data: orderColumn(filtered.filter(t=>t.status==='done')), bg: 'bg-emerald-50/50 border-emerald-100 opacity-90', text: 'text-emerald-800', iconColor: 'text-emerald-500' }
               ].map(col => (
                 <div key={col.id} className={`flex-1 w-full flex flex-col gap-4 p-4 rounded-3xl border ${col.bg}`} onDragOver={e=>e.preventDefault()} onDrop={(e)=>{ const taskId = e.dataTransfer.getData('taskId'); if(taskId) toggleStatus(taskId, col.id); }}>
                   <div className="flex items-center justify-between px-2">
