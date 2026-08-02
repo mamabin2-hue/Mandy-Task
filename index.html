@@ -140,6 +140,19 @@
       const isRunning = activeTimer === task.id;
       const projectInfo = projects.find(p => p.name === task.category);
       const projectColor = projectInfo?.color || '#cbd5e1';
+
+      // 到期提醒：依截止日與今天的差距決定顏色（逾期紅／今明橙／3天內黃）
+      const dueInfo = (() => {
+        if (!task.deadline || (task.status || '').includes('done')) return null;
+        const today = new Date(); today.setHours(0,0,0,0);
+        const d = new Date(task.deadline + 'T00:00:00'); if (isNaN(d)) return null;
+        const days = Math.round((d - today) / 86400000);
+        if (days < 0) return { cls: 'text-rose-700 bg-rose-50 border-rose-200', label: `逾期${-days}天`, dot: 'bg-rose-500' };
+        if (days === 0) return { cls: 'text-rose-700 bg-rose-50 border-rose-200', label: '今天到期', dot: 'bg-rose-500' };
+        if (days === 1) return { cls: 'text-orange-700 bg-orange-50 border-orange-200', label: '明天到期', dot: 'bg-orange-500' };
+        if (days <= 3) return { cls: 'text-amber-700 bg-amber-50 border-amber-200', label: `${days}天內`, dot: 'bg-amber-500' };
+        return null;
+      })();
       
       const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
       const [manualMins, setManualMins] = useState('');
@@ -246,9 +259,10 @@
              
              {!(task.status || '').includes('done') && (
                <div className="flex items-center gap-2 shrink-0">
-                 <div className="flex items-center gap-1.5 text-slate-500 bg-white px-2 py-1.5 rounded-lg border border-slate-200 font-bold text-xs shadow-sm group/date relative">
-                   <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                 <div className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg border font-bold text-xs shadow-sm group/date relative ${dueInfo ? dueInfo.cls : 'text-slate-500 bg-white border-slate-200'}`}>
+                   <Calendar className={`w-3.5 h-3.5 ${dueInfo ? '' : 'text-slate-400'}`} />
                    <input type="date" className="bg-transparent outline-none w-[105px] cursor-pointer" value={task.deadline || ''} onChange={(e) => updateTask(task.id, 'deadline', e.target.value)} onClick={stopDrag} onDragStart={stopDragAndDrop} />
+                   {dueInfo && <span className="whitespace-nowrap flex items-center gap-1"><span className={`w-1.5 h-1.5 rounded-full ${dueInfo.dot} animate-pulse`}></span>{dueInfo.label}</span>}
                  </div>
                  <div className="flex items-center gap-1 text-indigo-700 bg-indigo-50 px-2.5 py-1.5 rounded-lg font-black text-sm border border-indigo-100 shadow-sm justify-center min-w-[60px]" title="系統自動計算總時數">
                    <Clock className="w-3.5 h-3.5 opacity-70" />
