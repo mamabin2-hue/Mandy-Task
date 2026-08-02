@@ -990,7 +990,7 @@
       const [activeView, setActiveView] = useState('board');
       const [searchQuery, setSearchQuery] = useState('');
       const [sheetSort, setSheetSort] = useState({ key: 'createdAt', dir: 'desc' }); // 任務總表排序
-      const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+      const [isSidebarOpen, setIsSidebarOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true));
       const [isLoaded, setIsLoaded] = useState(false);
       
       const [tasks, setTasks] = useState([]);
@@ -1841,7 +1841,8 @@
 
           <input type="file" ref={fileInputRef} onChange={handleImport} accept=".json" className="hidden" />
 
-          <div className={`flex flex-col bg-slate-900 text-slate-300 transition-all duration-300 ${isSidebarOpen ? 'w-64' : 'w-0 overflow-hidden opacity-0'} shrink-0 h-full border-r border-slate-800 relative z-40`}>
+          {isSidebarOpen && <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
+          <div className={`flex flex-col bg-slate-900 text-slate-300 transition-all duration-300 h-full border-r border-slate-800 shrink-0 ${isSidebarOpen ? 'w-64 fixed inset-y-0 left-0 z-50 lg:static lg:z-40' : 'w-0 overflow-hidden opacity-0'}`}>
             <div className="h-20 flex items-center px-6 border-b border-slate-800 shrink-0 bg-slate-950/50">
                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center mr-3 shadow-lg shadow-indigo-500/20"><CheckCircle className="w-5 h-5 text-white" /></div>
                <span className="text-xl font-black text-white tracking-tight">TaskFlow</span>
@@ -1865,7 +1866,7 @@
                    { id: 'settings', icon: Settings, label: '系統設定' },
                    { id: 'guide', icon: Info, label: '系統說明' }
                  ].map(item => (
-                   <button key={item.id} onClick={() => setActiveView(item.id)} className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50' : 'hover:bg-slate-800 hover:text-white'}`}>
+                   <button key={item.id} onClick={() => { setActiveView(item.id); if (typeof window !== 'undefined' && window.innerWidth < 1024) setIsSidebarOpen(false); }} className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50' : 'hover:bg-slate-800 hover:text-white'}`}>
                      <item.icon className="w-5 h-5" /> {item.label}
                    </button>
                  ))}
