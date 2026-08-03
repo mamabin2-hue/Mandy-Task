@@ -206,7 +206,7 @@
     });
 
     // 任務卡片元件
-    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, compact }) => {
+    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, compact, onArchive }) => {
       const isRunning = activeTimer === task.id;
       const projectInfo = projects.find(p => p.name === task.category);
       const projectColor = projectInfo?.color || '#cbd5e1';
@@ -271,6 +271,11 @@
                  <ChevronDown className="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                </div>
              </div>
+             {onArchive && (
+               <button onClick={(e) => { e.stopPropagation(); onArchive(task); }} onDragStart={stopDragAndDrop} title="歸檔到知識庫（自動建議分類）" className="w-7 h-7 rounded-full flex items-center justify-center text-slate-300 hover:text-amber-500 hover:bg-amber-50 transition-colors shrink-0">
+                  <BookOpen className="w-3.5 h-3.5" />
+               </button>
+             )}
              <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} onDragStart={stopDragAndDrop} className="w-7 h-7 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0">
                 <Trash2 className="w-3.5 h-3.5" />
              </button>
@@ -1654,7 +1659,7 @@
       const orderColumn = (arr) => [...arr].sort((a, b) => (a.id === activeTimer ? -1 : 0) - (b.id === activeTimer ? -1 : 0));
 
       const renderBoard = () => {
-        let filtered = tasks;
+        let filtered = tasks.filter(t => !t.archived);   // 已歸檔到知識庫的任務不再顯示於看板
         if (filterType === 'uncat') filtered = filtered.filter(t => t.type === 'uncat' || !t.category);
         if (filterType === 'work') {
             filtered = filtered.filter(t => t.type === 'work' || t.category);
@@ -1741,7 +1746,7 @@
                   <div className="flex flex-col gap-0 min-h-[200px]">
                      {data.map(task => (
                         <div key={task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)}>
-                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} />
+                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} onArchive={(t) => openArchive('task', t)} />
                         </div>
                      ))}
                      {data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">{searching ? '查無符合' : '無任務或拖曳至此'}</div>}
