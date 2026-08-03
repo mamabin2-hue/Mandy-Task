@@ -1127,7 +1127,7 @@
       const [sheetSort, setSheetSort] = useState({ key: 'createdAt', dir: 'desc' }); // 任務總表排序
       const [sheetFilters, setSheetFilters] = useState({ status: [], category: [], period: [], assignee: [] }); // 任務總表 Excel 式欄位篩選（空=全部）
       const [openFilter, setOpenFilter] = useState(null); // 目前展開的篩選欄
-      const [boardCompact, setBoardCompact] = useState(false); // 看板精簡/完整檢視
+      const [boardCompact, setBoardCompact] = useState(() => { try { return localStorage.getItem('mt_board_compact') !== '0'; } catch (e) { return true; } }); // 看板精簡/完整檢視（預設精簡：只看任務名+重點）
       const [isSidebarOpen, setIsSidebarOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true));
       const [isLoaded, setIsLoaded] = useState(false);
       const autoBackupKey = 'mt_last_autobackup_' + (uid || 'anon');
@@ -1373,7 +1373,7 @@
 
       // 離開「看板／總表」時清空搜尋，避免切回來時任務被舊搜尋條件過濾掉、讓人誤以為任務不見
       useEffect(() => {
-        if (activeView !== 'board' && activeView !== 'sheet') setSearchQuery('');
+        if (activeView !== 'board' && activeView !== 'sheet' && activeView !== 'notes') setSearchQuery('');
       }, [activeView]);
 
       // 關頁面 / 切換 App / 鎖螢幕前，立即把待寫的最後一筆存回雲端（手機尤其重要）
@@ -1603,7 +1603,7 @@
                     <Calendar className="w-4 h-4 text-slate-400" />
                     <input type="date" className="text-sm font-bold text-slate-600 bg-transparent outline-none cursor-pointer" value={newTaskDeadline} onChange={(e) => setNewTaskDeadline(e.target.value)} />
                  </div>
-                 <button onClick={() => setBoardCompact(v => !v)} title={boardCompact ? '切換為完整檢視' : '切換為精簡檢視（只看標題與日期）'} className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold border shadow-sm transition-colors ${boardCompact ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+                 <button onClick={() => setBoardCompact(v => { const nv = !v; try { localStorage.setItem('mt_board_compact', nv ? '1' : '0'); } catch (e) {} return nv; })} title={boardCompact ? '切換為完整檢視' : '切換為精簡檢視（只看標題與日期）'} className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold border shadow-sm transition-colors ${boardCompact ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
                     <ListIcon className="w-4 h-4" /> {boardCompact ? '精簡' : '完整'}
                  </button>
               </div>
@@ -1693,8 +1693,14 @@
                   </div>
                </div>
             </div>
+            {searching && notes.filter(n => { const q = searchQuery.trim().toLowerCase(); return [n.text, n.tag].filter(Boolean).join(' ').toLowerCase().includes(q); }).length === 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 text-sm font-bold text-amber-800">找不到符合「{searchQuery}」的便利貼。</div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
-               {notes.map((note, index) => (
+               {notes.map((note, index) => {
+                  // 搜尋中：不符關鍵字的便利貼隱藏（用 return null 保留原索引，拖曳排序不受影響）
+                  if (searching) { const q = searchQuery.trim().toLowerCase(); const hay = [note.text, note.tag].filter(Boolean).join(' ').toLowerCase(); if (!hay.includes(q)) return null; }
+                  return (
                   <div key={note.id} draggable onDragStart={(e) => { setDraggedNoteIndex(index); e.dataTransfer.effectAllowed = "move"; }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
                            e.preventDefault();
                            if (draggedNoteIndex === null || draggedNoteIndex === index) return;
@@ -1734,7 +1740,8 @@
                         <button onClick={() => { setNotes(notes.filter(n => n.id !== note.id)); setDeletedNotes([{ ...note, deletedAt: new Date().toISOString() }, ...deletedNotes]); }} title="刪除（可到回收桶復原）" className="w-7 h-7 bg-white/60 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Trash2 className="w-3.5 h-3.5" /></button>
                      </div>
                   </div>
-               ))}
+                  );
+               })}
             </div>
             {lightbox && (
               <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out animate-in fade-in duration-150" onClick={() => setLightbox(null)}>
@@ -2388,11 +2395,11 @@
                     {activeView === 'settings' && '系統設定'}
                     {activeView === 'guide' && '📖 系統說明'}
                   </h1>
-                  {(activeView === 'board' || activeView === 'sheet') && (
+                  {(activeView === 'board' || activeView === 'sheet' || activeView === 'notes') && (
                   <div className="relative block">
                     <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
                     <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
-                      placeholder="搜尋 任務／人員／專案…"
+                      placeholder={activeView === 'notes' ? '搜尋便利貼內容／人員…' : '搜尋 任務／人員／專案…'}
                       className="w-44 sm:w-64 lg:w-80 pl-9 pr-8 py-2 rounded-xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:bg-white focus:ring-2 focus:ring-indigo-400 transition-all" />
                     {searchQuery && <button onClick={()=>setSearchQuery('')} title="清除搜尋" className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4"/></button>}
                   </div>
