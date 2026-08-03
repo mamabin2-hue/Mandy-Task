@@ -1749,6 +1749,15 @@
                 </div>
                 );
               })}
+              <div className="w-full lg:w-52 shrink-0">
+                <button type="button" onClick={() => {
+                  const name = (window.prompt('新欄位名稱（例如：合約、離職、保險…）：', '') || '').trim();
+                  if (!name) return;
+                  setBoardColumns(prev => { const cols = [...prev]; const di = cols.findIndex(c => c.id === 'done'); const item = { id: 'col_' + Date.now().toString(36), title: name, builtin: false }; if (di >= 0) cols.splice(di, 0, item); else cols.push(item); return cols; });
+                }} className="w-full min-h-[120px] border-2 border-dashed border-slate-300 rounded-3xl flex flex-col items-center justify-center gap-1 text-slate-400 hover:text-indigo-500 hover:border-indigo-300 hover:bg-indigo-50/30 font-black transition-colors">
+                  <Plus className="w-6 h-6" /> 新增欄位
+                </button>
+              </div>
             </div>
           </div>
         );
