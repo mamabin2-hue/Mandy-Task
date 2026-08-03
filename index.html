@@ -1145,6 +1145,9 @@
       const noteDraftKey = 'mt_note_draft_' + (uid || 'anon');
       const [noteDraftSaved, setNoteDraftSaved] = useState(false);
       const [lightbox, setLightbox] = useState(null); // 放大檢視的圖片 dataURL
+      const onboardedKey = 'mt_onboarded_' + (uid || 'anon');
+      const [showWelcome, setShowWelcome] = useState(() => { try { return localStorage.getItem(onboardedKey) !== '1'; } catch (e) { return false; } });
+      const dismissWelcome = () => { try { localStorage.setItem(onboardedKey, '1'); } catch (e) {} setShowWelcome(false); };
 
       // 貼圖：把壓縮後的圖片加進某張便利貼，加前檢查整份資料大小避免撐爆雲端單檔 1MB
       const addImageToNote = async (noteId, blob) => {
@@ -2209,6 +2212,25 @@
                <p className="text-slate-600 font-bold text-sm leading-relaxed">提供多種顏色的馬卡龍便利貼。滑鼠按住便利貼即可拖曳改變排序（把重要的往前拉），左下角還能隨時更改指派的人員。</p>
             </div>
           </div>
+          <h3 className="text-2xl font-black text-slate-800 mt-8 mb-4 px-2">🤝 分享給同事 & 資料安全</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div className="bg-white p-8 rounded-3xl border border-sky-200 shadow-sm">
+               <h4 className="text-lg font-black text-sky-600 mb-2 flex items-center gap-2"><User className="w-5 h-5" /> 怎麼分享給同事</h4>
+               <p className="text-slate-600 font-bold text-sm leading-relaxed">
+                 1. 把這個網站的<span className="text-sky-600">網址</span>給同事。<br/>
+                 2. 給他<span className="text-sky-600">邀請碼</span>：<span className="inline-block bg-sky-50 text-sky-700 px-2 py-0.5 rounded-md border border-sky-200 font-black tracking-wider">{INVITE_CODE}</span><br/>
+                 3. 他用自己的 Email 註冊（要填邀請碼）即可開始用。<br/>
+                 <span className="text-slate-500">每個人的資料<span className="text-slate-700">各自獨立、看不到彼此</span>；沒有邀請碼的陌生人無法註冊。</span>
+               </p>
+            </div>
+            <div className="bg-white p-8 rounded-3xl border border-emerald-200 shadow-sm">
+               <h4 className="text-lg font-black text-emerald-600 mb-2 flex items-center gap-2"><CheckCircle className="w-5 h-5" /> 資料會不會不見？</h4>
+               <p className="text-slate-600 font-bold text-sm leading-relaxed">
+                 不會。你的資料<span className="text-emerald-600">即時存在雲端</span>，換手機、換電腦登入同一帳號都在。系統每天還會自動留一份備份。<br/>
+                 <span className="text-slate-500">敏感個案（資遣/考核/含真名）建議只寫編號或代稱，避免完整個資上雲。</span>
+               </p>
+            </div>
+          </div>
           <h3 className="text-2xl font-black text-slate-800 mt-8 mb-4 px-2">🚑 疑難雜症急救指南</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-red-600 mb-2 flex items-center gap-2">任務突然不見了？</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">1. 檢查是否移到了「已完成」超過 7 天，可至「任務總表」中尋找。<br/>2. 檢查左側邊欄是否選到了單一專案，請切換回「所有工作專案 (ALL)」。</p></div>
@@ -2237,6 +2259,36 @@
           )}
 
           <input type="file" ref={fileInputRef} onChange={handleImport} accept=".json" className="hidden" />
+
+          {showWelcome && isLoaded && (
+            <div className="fixed inset-0 z-[90] bg-black/50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={dismissWelcome}>
+              <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 sm:p-8 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-11 h-11 rounded-2xl bg-indigo-600 flex items-center justify-center text-white"><CheckCircle className="w-6 h-6" /></div>
+                  <h2 className="text-xl font-black text-slate-800">歡迎使用 TaskFlow！</h2>
+                </div>
+                <div className="flex flex-col gap-3 text-sm">
+                  <div className="flex items-start gap-3 bg-emerald-50 border border-emerald-100 rounded-2xl p-3">
+                    <CheckCircle className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
+                    <p className="font-bold text-slate-700">你的資料<span className="text-emerald-600">自動存在雲端，不會不見</span>。換手機、換電腦登入同一個帳號，資料都在、還會即時同步。</p>
+                  </div>
+                  <div className="flex items-start gap-3 bg-slate-50 border border-slate-100 rounded-2xl p-3">
+                    <Plus className="w-5 h-5 text-indigo-500 shrink-0 mt-0.5" />
+                    <p className="font-bold text-slate-700">怎麼開始：在「<span className="text-indigo-600">看板模式</span>」上方的輸入框打字、按 Enter，就新增了一筆任務。</p>
+                  </div>
+                  <div className="flex items-start gap-3 bg-slate-50 border border-slate-100 rounded-2xl p-3">
+                    <BookOpen className="w-5 h-5 text-purple-500 shrink-0 mt-0.5" />
+                    <p className="font-bold text-slate-700">不會用時：左側選單最下面的「<span className="text-purple-600">系統說明</span>」有完整教學。</p>
+                  </div>
+                  <div className="flex items-start gap-3 bg-sky-50 border border-sky-100 rounded-2xl p-3">
+                    <User className="w-5 h-5 text-sky-500 shrink-0 mt-0.5" />
+                    <p className="font-bold text-slate-700">想分享給同事：把<span className="text-sky-600">網址</span>和<span className="text-sky-600">邀請碼</span>給他，他自己註冊帳號即可。<span className="text-slate-500">大家的資料各自獨立、看不到彼此。</span></p>
+                  </div>
+                </div>
+                <button onClick={dismissWelcome} className="mt-5 w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-black transition-colors">開始使用</button>
+              </div>
+            </div>
+          )}
 
           {isSidebarOpen && <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
           <div className={`flex flex-col bg-slate-900 text-slate-300 transition-all duration-300 h-full border-r border-slate-800 shrink-0 ${isSidebarOpen ? 'w-64 fixed inset-y-0 left-0 z-50 lg:static lg:z-40' : 'w-0 overflow-hidden opacity-0'}`}>
@@ -2385,9 +2437,14 @@
     }
 
     // ── 登入畫面 ────────────────────────────────────────────
+    // 註冊邀請碼：陌生人不知道碼就無法自助註冊；要分享給同事時，把這個碼給他即可。
+    // 想換碼 → 改下面這行的字串（例如換成當季的碼），重新整理即生效。
+    const INVITE_CODE = 'HL-Task-2026';
+
     function LoginScreen() {
       const [email, setEmail] = useState('');
       const [password, setPassword] = useState('');
+      const [invite, setInvite] = useState('');
       const [mode, setMode] = useState('login');
       const [err, setErr] = useState('');
       const [msg, setMsg] = useState('');
@@ -2410,6 +2467,7 @@
         setErr(''); setBusy(true);
         try {
           if (mode === 'register') {
+            if ((invite || '').trim() !== INVITE_CODE) throw { code: 'bad-invite' };
             if (password.length < 6) throw { code: 'auth/weak-password' };
             await createUserWithEmailAndPassword(fbAuth, email.trim(), password);
           } else {
@@ -2424,7 +2482,8 @@
             'auth/invalid-credential': '信箱或密碼錯誤',
             'auth/user-not-found': '查無此帳號，請先建立帳號',
             'auth/wrong-password': '密碼錯誤',
-            'auth/too-many-requests': '嘗試太多次，請稍後再試'
+            'auth/too-many-requests': '嘗試太多次，請稍後再試',
+            'bad-invite': '邀請碼不正確。請向管理者（Mandy）索取邀請碼才能註冊。'
           };
           setErr(map[e2.code] || ('發生錯誤：' + (e2.code || e2.message || e2)));
         } finally { setBusy(false); }
@@ -2449,6 +2508,13 @@
                 <input type="password" value={password} onChange={e=>setPassword(e.target.value)} required autoComplete={mode==='register'?'new-password':'current-password'}
                   className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 text-slate-700" placeholder="至少 6 個字" />
               </label>
+              {mode === 'register' && (
+                <label className="text-sm font-bold text-slate-600">邀請碼
+                  <input type="text" value={invite} onChange={e=>setInvite(e.target.value)} required
+                    className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 text-slate-700" placeholder="向管理者索取的邀請碼" />
+                  <span className="block mt-1 text-xs font-normal text-slate-400">沒有邀請碼無法註冊（防止陌生人使用）。</span>
+                </label>
+              )}
               {err && <div className="text-sm text-rose-600 bg-rose-50 rounded-xl px-3 py-2 font-bold">{err}</div>}
               {msg && <div className="text-sm text-emerald-700 bg-emerald-50 rounded-xl px-3 py-2 font-bold">{msg}</div>}
               <button type="submit" disabled={busy}
