@@ -1633,7 +1633,39 @@
           } catch(error) {
             alert('還原失敗，檔案格式可能錯誤: ' + error.message);
           }
-          e.target.value = ''; 
+          e.target.value = '';
+        };
+        reader.readAsText(file);
+      };
+
+      // 從 Jira 匯入（合併）：只新增/更新有 jiraKey 的任務，不動你其他任務
+      const jiraFileRef = useRef(null);
+      const handleJiraImport = (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          try {
+            const data = JSON.parse(event.target.result);
+            const incoming = Array.isArray(data.tasks) ? data.tasks : [];
+            if (!incoming.length) { alert('這個檔沒有可匯入的 Jira 卡片。'); e.target.value = ''; return; }
+            setTasks(prev => {
+              const arr = Array.isArray(prev) ? [...prev] : [];
+              let added = 0, updated = 0;
+              incoming.forEach(it => {
+                const key = it.jiraKey;
+                const idx = key ? arr.findIndex(t => t && t.jiraKey === key) : -1;
+                const healed = healTaskData({ ...it });
+                if (idx >= 0) { arr[idx] = { ...arr[idx], text: healed.text, deadline: healed.deadline, status: it.status || arr[idx].status, jiraKey: key, fromJira: true }; updated++; }
+                else { arr.unshift({ ...healed, jiraKey: key, fromJira: true }); added++; }
+              });
+              alert('從 Jira 匯入完成：新增 ' + added + ' 筆、更新 ' + updated + ' 筆。');
+              return arr;
+            });
+          } catch (error) {
+            alert('Jira 匯入失敗，檔案格式可能錯誤: ' + error.message);
+          }
+          e.target.value = '';
         };
         reader.readAsText(file);
       };
@@ -2495,6 +2527,10 @@
             <div className="p-4 border-t border-slate-800 flex gap-2 bg-slate-950/50">
                <button onClick={handleExport} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="直接下載備份檔，無需確認"><Download className="w-3.5 h-3.5" /> 備份下載</button>
                <button onClick={() => fileInputRef.current.click()} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="上傳還原"><Upload className="w-3.5 h-3.5" /> 還原資料</button>
+            </div>
+            <div className="px-4 pb-1 bg-slate-950/50">
+               <input type="file" ref={jiraFileRef} onChange={handleJiraImport} accept=".json" className="hidden" />
+               <button onClick={() => jiraFileRef.current.click()} className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-sky-900/40 hover:bg-sky-800/60 text-sky-300 text-xs font-black transition-colors" title="選擇 _Jira同步 產生的 jira_pull.json，把 Jira 卡片合併進來（只新增/更新，不動其他任務）"><Download className="w-3.5 h-3.5" /> 從 Jira 匯入</button>
             </div>
             <div className="px-4 pb-2 flex items-center justify-between gap-2 bg-slate-950/50">
                <div className="flex flex-col">
