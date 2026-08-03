@@ -132,7 +132,8 @@
           timeSpent = isNaN(Number(task.timeSpent)) ? 0 : Number(task.timeSpent);
       }
 
-      return { ...task, id: task.id || Date.now().toString(), text, status, assignee, period, category, logs, timeSpent, createdAt: task.createdAt || new Date().toISOString(), deadline: task.deadline || '' };
+      const subtasks = Array.isArray(task.subtasks) ? task.subtasks.filter(s => s && typeof s === 'object').map(s => ({ id: s.id || (Date.now().toString() + Math.random().toString(36).slice(2)), text: String(s.text || ''), done: !!s.done })) : [];
+      return { ...task, id: task.id || Date.now().toString(), text, status, assignee, period, category, logs, timeSpent, subtasks, createdAt: task.createdAt || new Date().toISOString(), deadline: task.deadline || '' };
     };
 
     // 任務卡片元件
@@ -157,6 +158,14 @@
       const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
       const [manualMins, setManualMins] = useState('');
       const [manualNote, setManualNote] = useState('');
+      const [newSub, setNewSub] = useState('');
+
+      // 子任務 (checklist)：存在 task.subtasks，走 updateTask 通用 setter → 外層雲端同步
+      const subs = Array.isArray(task.subtasks) ? task.subtasks : [];
+      const subsDone = subs.filter(s => s && s.done).length;
+      const addSub = () => { const t = newSub.trim(); if (!t) return; updateTask(task.id, 'subtasks', [...subs, { id: Date.now().toString() + Math.random().toString(36).slice(2), text: t, done: false }]); setNewSub(''); };
+      const toggleSub = (sid) => { updateTask(task.id, 'subtasks', subs.map(s => s && s.id === sid ? { ...s, done: !s.done } : s)); };
+      const delSub = (sid) => { updateTask(task.id, 'subtasks', subs.filter(s => s && s.id !== sid)); };
 
       const titleRef = useRef(null);
       const noteRef = useRef(null);
@@ -214,6 +223,29 @@
                  </div>
                </div>
                <textarea ref={noteRef} className="w-full text-sm font-bold text-slate-600 bg-yellow-50/80 p-3 outline-none resize-none placeholder-slate-400 focus:bg-yellow-100/50 transition-colors overflow-hidden leading-relaxed" style={{ minHeight: '60px' }} value={task.note || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target)} onChange={(e) => updateTask(task.id, 'note', e.target.value)} placeholder="點此直接輸入備註、交辦事項..." />
+            </div>
+
+            {/* 子任務 / checklist */}
+            <div className="flex flex-col gap-1.5 border border-sky-100 rounded-xl p-2.5 bg-sky-50/30">
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-1.5 text-sky-600 text-xs font-black"><CheckCircle className="w-3.5 h-3.5" /> 子任務</div>
+                {subs.length > 0 && (<span className="text-[11px] font-bold text-sky-500">{subsDone}/{subs.length} 完成</span>)}
+              </div>
+              {subs.length > 0 && (
+                <div className="flex flex-col gap-1 max-h-[160px] overflow-y-auto custom-scrollbar pr-1">
+                  {subs.map((s) => (
+                    <div key={s.id} className="flex items-center gap-2 group/sub bg-white border border-slate-100 rounded-lg px-2 py-1.5">
+                      <button type="button" onClick={(e) => { e.stopPropagation(); toggleSub(s.id); }} onDragStart={stopDragAndDrop} className={`w-4 h-4 rounded shrink-0 flex items-center justify-center border transition-colors ${s.done ? 'bg-emerald-500 border-emerald-500 text-white' : 'bg-white border-slate-300 hover:border-emerald-400'}`} title={s.done ? '標為未完成' : '標為完成'}>{s.done && <Check className="w-3 h-3" />}</button>
+                      <span className={`flex-1 text-xs font-bold break-words ${s.done ? 'text-slate-400 line-through' : 'text-slate-700'}`}>{s.text}</span>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); delSub(s.id); }} onDragStart={stopDragAndDrop} className="w-5 h-5 rounded-full text-slate-300 opacity-0 group-hover/sub:opacity-100 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-all shrink-0" title="刪除子任務"><Trash2 className="w-3 h-3" /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2">
+                <input type="text" value={newSub} onChange={(e) => setNewSub(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSub(); } }} onClick={stopDrag} onDragStart={stopDragAndDrop} placeholder="新增子任務，按 Enter" className="flex-1 bg-white border border-slate-200 text-slate-600 text-xs font-bold px-2 py-1.5 rounded-lg outline-none focus:border-sky-300" />
+                <button type="button" onClick={(e) => { e.stopPropagation(); addSub(); }} onDragStart={stopDragAndDrop} className="bg-sky-600 hover:bg-sky-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors shrink-0 shadow-sm">+ 加入</button>
+              </div>
             </div>
 
             <div className="mt-2 flex flex-col gap-2 pt-3 border-t border-slate-100">
