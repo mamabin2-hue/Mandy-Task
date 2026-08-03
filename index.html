@@ -46,7 +46,7 @@
       LayoutDashboard, List as ListIcon, PenSquare, MessageSquare, BarChart2, 
       Settings, BookOpen, Plus, Search, Filter, Calendar, Clock, User, 
       Trash2, Edit2, Play, Square, CheckCircle, ChevronDown, PieChart as PieChartIcon, 
-      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle, Mail, Send
+      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle, Mail, Send, RotateCcw, Trash
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
@@ -988,6 +988,52 @@
       );
     };
 
+    // 便利貼回收桶：刪掉的便利貼可復原或永久刪除（依丟棄時間新到舊排序）
+    const RecycleBin = ({ deletedNotes, setDeletedNotes, notes, setNotes }) => {
+      const list = Array.isArray(deletedNotes) ? deletedNotes : [];
+      const sorted = list.slice().sort((a, b) => {
+        const va = new Date(a && a.deletedAt).getTime() || 0;
+        const vb = new Date(b && b.deletedAt).getTime() || 0;
+        return vb - va;
+      });
+      const fmt = (d) => { if (!d) return '—'; try { const dt = new Date(d); if (isNaN(dt.getTime())) return '—'; return dt.toLocaleString('zh-TW', { year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch (e) { return '—'; } };
+      const restore = (note) => {
+        const { deletedAt, ...rest } = note || {};
+        setNotes([rest, ...(Array.isArray(notes) ? notes : [])]);
+        setDeletedNotes(list.filter((n) => n && n.id !== note.id));
+      };
+      const purge = (note) => { setDeletedNotes(list.filter((n) => n && n.id !== note.id)); };
+      const purgeAll = () => { if (window.confirm('確定要清空回收桶？此動作無法復原。')) setDeletedNotes([]); };
+      return (
+        <div className="w-full animate-in fade-in duration-300 pb-10">
+          <div className="flex items-start justify-between gap-3 mb-4 px-1 flex-wrap">
+            <div className="flex items-start gap-2"><Trash size={16} className="text-slate-500 mt-0.5 shrink-0" /><p className="text-sm text-slate-600">刪掉的便利貼會先放這裡，可以「復原」放回隨手筆記，或「永久刪除」。依丟棄時間新到舊排序。</p></div>
+            {sorted.length > 0 && (<button type="button" onClick={purgeAll} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-red-50 text-red-600 hover:bg-red-100 transition-colors shrink-0"><Trash2 size={14} />清空回收桶</button>)}
+          </div>
+          {sorted.length === 0 ? (
+            <div className="text-center text-sm text-slate-400 py-20 bg-white rounded-3xl border border-slate-200">回收桶是空的</div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {sorted.map((note) => (
+                <div key={note.id} className={`p-5 rounded-3xl shadow-sm border border-black/5 flex flex-col gap-3 opacity-90 ${note.color || 'bg-yellow-100/70'}`}>
+                  <p className="text-sm font-bold text-slate-700 break-words leading-relaxed whitespace-pre-wrap line-clamp-6" style={{ minHeight: '48px' }}>{note.text || '(空白便利貼)'}</p>
+                  <div className="text-[11px] font-medium text-slate-500 space-y-0.5 border-t border-black/5 pt-2">
+                    {note.tag && (<div>@ {note.tag}</div>)}
+                    <div>建立：{fmt(note.createdAt)}</div>
+                    <div>丟棄：{fmt(note.deletedAt)}</div>
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <button type="button" onClick={() => restore(note)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"><RotateCcw size={13} />復原</button>
+                    <button type="button" onClick={() => purge(note)} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-bold bg-white/70 text-red-600 hover:bg-red-500 hover:text-white transition-colors"><Trash2 size={13} />永久刪除</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    };
+
     function TaskManager({ uid, userEmail }) {
       const [activeView, setActiveView] = useState('board');
       const [searchQuery, setSearchQuery] = useState('');
@@ -1001,6 +1047,7 @@
       const [users, setUsers] = useState(DEFAULT_USERS);
       const [notes, setNotes] = useState([]);
       const [knowledge, setKnowledge] = useState([]);
+      const [deletedNotes, setDeletedNotes] = useState([]);
 
       const [dialog, setDialog] = useState(null); 
       const [filterType, setFilterType] = useState('all'); 
@@ -1040,7 +1087,7 @@
       const buildLocalPayload = () => {
         let catMap = {};
         try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
-        return { tasks, projects, users, notes, catMap, knowledge };
+        return { tasks, projects, users, notes, catMap, knowledge, deletedNotes };
       };
 
       // 立即把待寫資料寫回雲端（去抖到期、或關頁前 flush 都走這裡）
@@ -1082,7 +1129,8 @@
                   users: Array.isArray(d.users) ? d.users : [],
                   notes: Array.isArray(d.notes) ? d.notes : [],
                   catMap: d.catMap || {},
-                  knowledge: Array.isArray(d.knowledge) ? d.knowledge : []
+                  knowledge: Array.isArray(d.knowledge) ? d.knowledge : [],
+                  deletedNotes: Array.isArray(d.deletedNotes) ? d.deletedNotes : []
                 };
                 const healedTasks = payload.tasks.map(t => healTaskData(t));
                 const mergedUsers = [...new Set([...DEFAULT_USERS, ...payload.users])];
@@ -1092,8 +1140,9 @@
                 setUsers(mergedUsers);
                 setNotes(payload.notes);
                 setKnowledge(payload.knowledge);
+                setDeletedNotes(payload.deletedNotes);
                 // 記錄「已與雲端一致」的 healed 版本（key 順序須與 buildLocalPayload 一致），寫效果才不會多寫一次
-                syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap, knowledge: payload.knowledge });
+                syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap, knowledge: payload.knowledge, deletedNotes: payload.deletedNotes });
               }
             }
             // exists 或 not-exists（首次登入）都算「成功讀到」→ 之後才允許寫入
@@ -1119,7 +1168,7 @@
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(() => flushSaveRef.current(), 800);
         return () => { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); } };
-      }, [tasks, projects, users, notes, knowledge, isLoaded, uid]);
+      }, [tasks, projects, users, notes, knowledge, deletedNotes, isLoaded, uid]);
 
       useEffect(() => {
         let interval = null;
@@ -1467,7 +1516,7 @@
                      <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
                         <button onClick={() => { window.location.href = 'mailto:?subject=' + encodeURIComponent('隨手筆記') + '&body=' + encodeURIComponent(note.text || ''); }} title="用 Outlook 寄出這則筆記" className="w-8 h-8 bg-white/60 hover:bg-indigo-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Mail className="w-4 h-4" /></button>
                         <button onClick={() => { if (!(note.text || '').trim()) return; if (window.confirm('把這則筆記送到匯報清單（會建立一則任務' + (note.tag ? '，匯報給 ' + note.tag : '') + '）？')) { setTasks([healTaskData({ id: Date.now().toString(), text: note.text, assignee: note.tag || '', status: 'todo', category: '', period: '不指定時段', createdAt: new Date().toISOString() }), ...tasks]); } }} title="送到匯報清單（建立任務）" className="w-8 h-8 bg-white/60 hover:bg-emerald-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Send className="w-4 h-4" /></button>
-                        <button onClick={() => setNotes(notes.filter(n => n.id !== note.id))} title="刪除" className="w-8 h-8 bg-white/60 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={() => { setNotes(notes.filter(n => n.id !== note.id)); setDeletedNotes([{ ...note, deletedAt: new Date().toISOString() }, ...deletedNotes]); }} title="刪除（可到回收桶復原）" className="w-8 h-8 bg-white/60 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Trash2 className="w-4 h-4" /></button>
                      </div>
                   </div>
                ))}
@@ -1888,6 +1937,7 @@
                    { id: 'planner', icon: Calendar, label: '每日/週計劃' },
                    { id: 'dedup', icon: Copy, label: '找重複' },
                    { id: 'notes', icon: PenSquare, label: '隨手筆記' },
+                   { id: 'recycle', icon: Trash, label: '回收桶' },
                    { id: 'report', icon: MessageSquare, label: '匯報清單' },
                    { id: 'kb', icon: BookOpen, label: '知識管理' },
                    { id: 'stats', icon: BarChart2, label: '統計報表' },
@@ -1953,6 +2003,7 @@
                     {activeView === 'focus' && '工作台（集中／暫緩）'}
                     {activeView === 'done' && '已完成任務'}
                     {activeView === 'notes' && '隨手筆記'}
+                   {activeView === 'recycle' && '🗑️ 回收桶（便利貼）'}
                     {activeView === 'report' && '匯報清單 (One-on-One)'}
                     {activeView === 'stats' && '統計報表'}
                     {activeView === 'kb' && '知識管理'}
@@ -1995,6 +2046,7 @@
                 {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} />}
                 {activeView === 'done' && <CompletedTasks tasks={tasks} projects={projects} />}
                 {activeView === 'notes' && renderNotes()}
+                {activeView === 'recycle' && <RecycleBin deletedNotes={deletedNotes} setDeletedNotes={setDeletedNotes} notes={notes} setNotes={setNotes} />}
                 {activeView === 'report' && renderReport()}
                 {activeView === 'stats' && renderStats()}
                 {activeView === 'ceo' && <CeoDashboard tasks={tasks} projects={projects} />}
