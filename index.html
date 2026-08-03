@@ -974,24 +974,27 @@
         const text = String((t && t.text) || '').toLowerCase(); const cat = catMeta(t && t.category).name.toLowerCase(); const assignee = String((t && t.assignee) || '').toLowerCase();
         return text.includes(kw) || cat.includes(kw) || assignee.includes(kw);
       }), [doneTasks, kw, catFilter, projByName]);
-      // 依 年→月→日 建樹（各層皆預設收合）
-      const dateTree = useMemo(() => {
-        const years = {};
+      // 任務清單為主，可切換分組：日期／分類／負責人（單層、預設展開，點任務看細節）
+      const [groupBy, setGroupBy] = useState('date');
+      const dayGroups = useMemo(() => {
+        const map = {};
         filtered.forEach((t) => {
-          const ms = getDoneTime(t); const d = ms == null ? null : new Date(ms);
-          const y = d ? d.getFullYear() : 0; const mo = d ? d.getMonth() + 1 : 0; const day = d ? d.getDate() : 0;
-          years[y] = years[y] || { y, count: 0, months: {} }; years[y].count++;
-          const M = years[y].months; M[mo] = M[mo] || { mo, count: 0, days: {} }; M[mo].count++;
-          const D = M[mo].days; D[day] = D[day] || { day, items: [] }; D[day].items.push(t);
+          let key, label, sortMs = 0;
+          if (groupBy === 'category') { const m = catMeta(t && t.category); key = 'c_' + m.name; label = m.name; }
+          else if (groupBy === 'assignee') { const a = (t && t.assignee) ? String(t.assignee) : '（未指定負責人）'; key = 'a_' + a; label = a; }
+          else { const ms = getDoneTime(t); const d = ms == null ? null : new Date(ms); label = d ? (d.getFullYear() + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0')) : '未知日期'; key = 'd_' + label; sortMs = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() : 0; }
+          if (!map[key]) map[key] = { key, label, sortMs, items: [] };
+          map[key].items.push(t);
         });
-        const yArr = Object.values(years).sort((a, b) => b.y - a.y);
-        yArr.forEach((yy) => { yy.monthArr = Object.values(yy.months).sort((a, b) => b.mo - a.mo); yy.monthArr.forEach((mm) => { mm.dayArr = Object.values(mm.days).sort((a, b) => b.day - a.day); mm.dayArr.forEach((dd) => dd.items.sort((a, b) => (getDoneTime(b) || 0) - (getDoneTime(a) || 0))); }); });
-        return yArr;
-      }, [filtered]);
-      const [expanded, setExpanded] = useState(() => new Set());
+        const arr = Object.values(map);
+        if (groupBy === 'date') arr.sort((a, b) => b.sortMs - a.sortMs); else arr.sort((a, b) => b.items.length - a.items.length);
+        arr.forEach((g) => g.items.sort((a, b) => (getDoneTime(b) || 0) - (getDoneTime(a) || 0)));
+        return arr;
+      }, [filtered, groupBy]);
+      const [collapsedDays, setCollapsedDays] = useState(() => new Set());   // 預設全展開
       const [openTask, setOpenTask] = useState(() => new Set());
       const mkTog = (setter) => (k) => setter((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
-      const togNode = mkTog(setExpanded);
+      const togDay = mkTog(setCollapsedDays);
       const togTask = mkTog(setOpenTask);
       const totalCount = doneTasks.length;
       const totalMinutes = useMemo(() => doneTasks.reduce((s, t) => s + getMinutes(t), 0), [doneTasks]);
@@ -1016,6 +1019,11 @@
               <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜尋任務、分類或負責人…" className="w-full pl-9 pr-9 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300" />
               {keyword && (<button onClick={() => setKeyword('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="清除"><X className="w-4 h-4" /></button>)}
             </div>
+            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value)} title="分組方式" className="sm:w-36 py-2 px-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200 cursor-pointer">
+              <option value="date">依日期分組</option>
+              <option value="category">依分類分組</option>
+              <option value="assignee">依負責人分組</option>
+            </select>
             <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="sm:w-56 py-2 px-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200 cursor-pointer">
               {catOptions.map(([v, label]) => <option key={v} value={v}>{v === '__all__' ? label : ('分類：' + label)}</option>)}
             </select>
@@ -1027,67 +1035,36 @@
               <div className="text-sm text-slate-500">{(kw || catFilter !== '__all__') ? '換個關鍵字或分類再試試看。' : '完成任務後就會彙整在這裡囉！'}</div>
             </div>
           ) : (
-            <div className="space-y-3">
-              {dateTree.map((yy) => {
-                const yKey = 'y' + yy.y; const yOpen = expanded.has(yKey);
+            <div className="space-y-2">
+              {dayGroups.map((g) => {
+                const open = !collapsedDays.has(g.key);
                 return (
-                <div key={yKey} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-                  <button onClick={() => togNode(yKey)} className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left">
-                    <Calendar className="w-4 h-4 text-indigo-500 shrink-0" />
-                    <span className="font-black text-slate-800">{yy.y ? (yy.y + ' 年') : '未知日期'}</span>
-                    <span className="text-xs font-medium text-indigo-600 bg-indigo-50 rounded-full px-2 py-0.5 shrink-0">{yy.count} 件</span>
-                    <ChevronDown className={'w-5 h-5 text-slate-400 ml-auto shrink-0 transition-transform ' + (yOpen ? 'rotate-180' : '')} />
+                <div key={g.key} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <button onClick={() => togDay(g.key)} className="w-full flex items-center gap-2 px-4 py-2.5 hover:bg-slate-50 transition-colors text-left">
+                    <Calendar className="w-4 h-4 text-indigo-400 shrink-0" />
+                    <span className="font-bold text-slate-700 text-sm">{g.label}</span>
+                    <span className="text-[11px] text-indigo-600 bg-indigo-50 rounded-full px-2 py-0.5 shrink-0">{g.items.length} 件</span>
+                    <ChevronDown className={'w-4 h-4 text-slate-400 ml-auto shrink-0 transition-transform ' + (open ? 'rotate-180' : '')} />
                   </button>
-                  {yOpen && (
-                    <div className="border-t border-slate-100 px-3 py-2 space-y-1.5">
-                      {yy.monthArr.map((mm) => {
-                        const mKey = yKey + '-m' + mm.mo; const mOpen = expanded.has(mKey);
+                  {open && (
+                    <div className="border-t border-slate-100 divide-y divide-slate-100">
+                      {g.items.map((t, idx) => {
+                        const tKey = g.key + '-' + (t && t.id != null ? t.id : idx); const tOpen = openTask.has(tKey); const meta = catMeta(t && t.category);
                         return (
-                        <div key={mKey} className="rounded-2xl bg-slate-50/70 border border-slate-100">
-                          <button onClick={() => togNode(mKey)} className="w-full flex items-center gap-2 px-4 py-2.5 text-left">
-                            <span className="font-bold text-slate-700 text-sm">{mm.mo ? (mm.mo + ' 月') : '未知月份'}</span>
-                            <span className="text-[11px] text-slate-500 bg-white rounded-full px-2 py-0.5 border border-slate-200 shrink-0">{mm.count} 件</span>
-                            <ChevronDown className={'w-4 h-4 text-slate-400 ml-auto shrink-0 transition-transform ' + (mOpen ? 'rotate-180' : '')} />
+                        <div key={tKey} className="px-4 py-2.5">
+                          <button onClick={() => togTask(tKey)} className="w-full flex items-center gap-2 text-left">
+                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: meta.color }} />
+                            <span className="text-sm font-medium text-slate-800 break-words flex-1">{String((t && t.text) || '（無標題）')}</span>
+                            <span className="text-[11px] text-slate-400 shrink-0 hidden sm:inline">{getDoneTimeLabel(t)}</span>
+                            <ChevronDown className={'w-3.5 h-3.5 text-slate-300 shrink-0 transition-transform ' + (tOpen ? 'rotate-180' : '')} />
                           </button>
-                          {mOpen && (
-                            <div className="px-2 pb-2 space-y-1">
-                              {mm.dayArr.map((dd) => {
-                                const dKey = mKey + '-d' + dd.day; const dOpen = expanded.has(dKey);
-                                return (
-                                <div key={dKey} className="rounded-xl bg-white border border-slate-100">
-                                  <button onClick={() => togNode(dKey)} className="w-full flex items-center gap-2 px-3 py-2 text-left">
-                                    <span className="font-bold text-slate-600 text-xs">{dd.day ? (dd.day + ' 日') : '—'}</span>
-                                    <span className="text-[11px] text-slate-400 shrink-0">{dd.items.length} 件</span>
-                                    <ChevronDown className={'w-3.5 h-3.5 text-slate-400 ml-auto shrink-0 transition-transform ' + (dOpen ? 'rotate-180' : '')} />
-                                  </button>
-                                  {dOpen && (
-                                    <div className="border-t border-slate-100 divide-y divide-slate-100">
-                                      {dd.items.map((t, idx) => {
-                                        const tKey = dKey + '-' + (t && t.id != null ? t.id : idx); const tOpen = openTask.has(tKey); const meta = catMeta(t && t.category);
-                                        return (
-                                        <div key={tKey} className="px-3 py-2">
-                                          <button onClick={() => togTask(tKey)} className="w-full flex items-center gap-2 text-left">
-                                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: meta.color }} />
-                                            <span className="text-sm font-medium text-slate-800 break-words flex-1">{String((t && t.text) || '（無標題）')}</span>
-                                            <ChevronDown className={'w-3.5 h-3.5 text-slate-300 shrink-0 transition-transform ' + (tOpen ? 'rotate-180' : '')} />
-                                          </button>
-                                          {tOpen && (
-                                            <div className="mt-1.5 ml-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ backgroundColor: meta.color + '22', color: meta.color }}>{meta.name}</span>
-                                              <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-400" />{getDoneTimeLabel(t)}</span>
-                                              <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-400" />{Math.round(getMinutes(t))} 分鐘</span>
-                                              {t && t.assignee ? (<span className="inline-flex items-center gap-1 text-slate-600">{String(t.assignee)}</span>) : null}
-                                              {onArchive ? (<button onClick={(e) => { e.stopPropagation(); onArchive(t); }} title="歸檔到知識庫（自動建議分類）" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 font-bold transition-colors"><BookOpen className="w-3.5 h-3.5" />歸檔到知識庫</button>) : null}
-                                            </div>
-                                          )}
-                                        </div>
-                                        );
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                                );
-                              })}
+                          {tOpen && (
+                            <div className="mt-1.5 ml-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ backgroundColor: meta.color + '22', color: meta.color }}>{meta.name}</span>
+                              <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-400" />{getDoneTimeLabel(t)}</span>
+                              <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-400" />{Math.round(getMinutes(t))} 分鐘</span>
+                              {t && t.assignee ? (<span className="inline-flex items-center gap-1 text-slate-600">{String(t.assignee)}</span>) : null}
+                              {onArchive ? (<button onClick={(e) => { e.stopPropagation(); onArchive(t); }} title="歸檔到知識庫（自動建議分類）" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 font-bold transition-colors"><BookOpen className="w-3.5 h-3.5" />歸檔到知識庫</button>) : null}
                             </div>
                           )}
                         </div>
@@ -2425,12 +2402,11 @@
                 <h2 className="text-lg font-black text-slate-800 mb-1 flex items-center gap-2"><BookOpen className="w-5 h-5 text-indigo-600" /> 歸檔到知識庫</h2>
                 <p className="text-xs text-slate-400 mb-4">會把這則{archiveTarget.type === 'note' ? '便利貼' : '任務'}存進知識庫，並{archiveTarget.type === 'note' ? '從便利貼撤出' : '標記為已歸檔'}。</p>
                 <div className="bg-slate-50 rounded-2xl p-3 mb-4 text-sm font-bold text-slate-700 max-h-28 overflow-y-auto break-words whitespace-pre-wrap">{String((archiveTarget.item && archiveTarget.item.text) || '(未命名)')}</div>
-                <label className="text-sm font-bold text-slate-600">歸到哪個分類 <span className="text-[11px] font-normal text-indigo-500">（系統已自動建議，可改）</span>
-                  <input list="archiveCatList" value={archiveCat} onChange={(e) => setArchiveCat(e.target.value)} className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 text-slate-700" placeholder="輸入或選擇分類" />
-                  <datalist id="archiveCatList">
-                    {archiveExistingCats.map((c) => <option key={'e' + c} value={c} />)}
-                    {ARCHIVE_KEYWORDS.map((m) => <option key={'k' + m.cat} value={m.cat} />)}
-                  </datalist>
+                <label className="text-sm font-bold text-slate-600">歸到哪個分類 <span className="text-[11px] font-normal text-indigo-500">（系統已自動建議，可改；你所有分類都在清單裡）</span>
+                  <select value={archiveCat} onChange={(e) => { if (e.target.value === '__new__') { const c = (window.prompt('自訂新分類名稱：', '') || '').trim(); if (c) setArchiveCat(c); } else setArchiveCat(e.target.value); }} className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 text-slate-700 bg-white cursor-pointer">
+                    {Array.from(new Set([archiveCat, ...archiveExistingCats, ...ARCHIVE_KEYWORDS.map((m) => m.cat)].filter(Boolean))).map((c) => <option key={c} value={c}>{c}</option>)}
+                    <option value="__new__">＋ 自訂新分類…</option>
+                  </select>
                 </label>
                 <div className="flex gap-2 mt-5">
                   <button onClick={() => setArchiveTarget(null)} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-600 font-black hover:bg-slate-200 transition-colors">取消</button>
