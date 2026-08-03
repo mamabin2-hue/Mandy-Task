@@ -136,6 +136,29 @@
       return { ...task, id: task.id || Date.now().toString(), text, status, assignee, period, category, logs, timeSpent, subtasks, createdAt: task.createdAt || new Date().toISOString(), deadline: task.deadline || '' };
     };
 
+    // 貼圖壓縮：讀圖→畫到 canvas 縮到 maxDim→輸出小 JPEG dataURL（控制雲端單檔大小）
+    const compressImage = (fileOrBlob, maxDim = 320, quality = 0.55) => new Promise((resolve, reject) => {
+      try {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('讀取圖片失敗'));
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onerror = () => reject(new Error('解析圖片失敗'));
+          img.onload = () => {
+            let w = img.width, h = img.height;
+            if (w >= h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
+            else if (h > w && h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
+            const canvas = document.createElement('canvas');
+            canvas.width = w; canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(fileOrBlob);
+      } catch (err) { reject(err); }
+    });
+
     // 任務卡片元件
     const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, compact }) => {
       const isRunning = activeTimer === task.id;
@@ -1088,6 +1111,36 @@
       const [deletedNotes, setDeletedNotes] = useState([]);
       const noteDraftKey = 'mt_note_draft_' + (uid || 'anon');
       const [noteDraftSaved, setNoteDraftSaved] = useState(false);
+      const [lightbox, setLightbox] = useState(null); // 放大檢視的圖片 dataURL
+
+      // 貼圖：把壓縮後的圖片加進某張便利貼，加前檢查整份資料大小避免撐爆雲端單檔 1MB
+      const addImageToNote = async (noteId, blob) => {
+        try {
+          const dataUrl = await compressImage(blob);
+          setNotes(prev => {
+            const cur = Array.isArray(prev) ? prev : [];
+            const target = cur.find(n => n.id === noteId);
+            if (!target) return cur;
+            const nextImages = [...(Array.isArray(target.images) ? target.images : []), dataUrl];
+            const candidate = cur.map(n => n.id === noteId ? { ...n, images: nextImages } : n);
+            // 大小保護：預估整份 state JSON，超過 ~850KB 就擋下（Firestore 單文件上限 1MB）
+            try {
+              const approx = JSON.stringify({ ...buildLocalPayload(), notes: candidate }).length;
+              if (approx > 850 * 1024) { window.alert('圖片太多了，為避免超過雲端單筆上限（會導致同步失敗），這張先不加。建議刪掉一些舊圖，或改用文字。'); return cur; }
+            } catch (e) {}
+            return candidate;
+          });
+        } catch (err) {
+          window.alert('這張圖片處理失敗，請換一張試試。');
+        }
+      };
+      const removeImageFromNote = (noteId, idx) => {
+        setNotes(prev => (Array.isArray(prev) ? prev : []).map(n => {
+          if (n.id !== noteId) return n;
+          const imgs = (Array.isArray(n.images) ? n.images : []).filter((_, i) => i !== idx);
+          return { ...n, images: imgs };
+        }));
+      };
 
       const [dialog, setDialog] = useState(null); 
       const [filterType, setFilterType] = useState('all'); 
@@ -1581,7 +1634,17 @@
                            setDraggedNoteIndex(null);
                        }}
                        className={`p-6 rounded-3xl shadow-sm hover:shadow-md transition-all relative group flex flex-col gap-4 cursor-grab active:cursor-grabbing border border-black/5 ${note.color || 'bg-yellow-100/70'}`}>
-                     <textarea className="w-full flex-1 bg-transparent resize-none outline-none font-bold text-slate-800 overflow-y-auto leading-relaxed custom-scrollbar" style={{ minHeight: '120px', maxHeight: '260px' }} value={note.text} onChange={e => setNotes(notes.map(n => n.id === note.id ? {...n, text: e.target.value} : n))} />
+                     <textarea className="w-full flex-1 bg-transparent resize-none outline-none font-bold text-slate-800 overflow-y-auto leading-relaxed custom-scrollbar" style={{ minHeight: '120px', maxHeight: '260px' }} value={note.text} onChange={e => setNotes(notes.map(n => n.id === note.id ? {...n, text: e.target.value} : n))} onPaste={(e) => { const items = (e.clipboardData && e.clipboardData.items) ? e.clipboardData.items : []; for (let i = 0; i < items.length; i++) { if (items[i].type && items[i].type.indexOf('image') === 0) { const blob = items[i].getAsFile(); if (blob) { e.preventDefault(); addImageToNote(note.id, blob); } } } }} title="可直接貼上圖片（Ctrl+V）" />
+                     {Array.isArray(note.images) && note.images.length > 0 && (
+                       <div className="flex flex-wrap gap-2 pt-1">
+                         {note.images.map((src, i) => (
+                           <div key={i} className="relative group/img">
+                             <img src={src} alt="貼圖" onClick={() => setLightbox(src)} className="w-16 h-16 object-cover rounded-lg border border-black/10 cursor-zoom-in shadow-sm" />
+                             <button onClick={(e) => { e.stopPropagation(); removeImageFromNote(note.id, i); }} title="移除這張圖" className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-white rounded-full shadow flex items-center justify-center text-slate-400 hover:text-red-500 opacity-0 group-hover/img:opacity-100 transition-opacity"><X className="w-3 h-3" /></button>
+                           </div>
+                         ))}
+                       </div>
+                     )}
                      <div className="flex items-center justify-between mt-auto pt-4 border-t border-black/5">
                         <select className="text-xs font-black bg-white/60 px-2 py-1.5 rounded-lg text-slate-700 outline-none cursor-pointer hover:bg-white/80 transition-colors border-none shadow-sm" value={note.tag || ''} onChange={(e) => setNotes(notes.map(n => n.id === note.id ? {...n, tag: e.target.value} : n))}>
                            <option value="">- 無相關人員 -</option>{users.map(u => <option key={u} value={u}>@ {u}</option>)}
@@ -1601,6 +1664,12 @@
                   </div>
                ))}
             </div>
+            {lightbox && (
+              <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out animate-in fade-in duration-150" onClick={() => setLightbox(null)}>
+                <img src={lightbox} alt="放大檢視" className="max-w-full max-h-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+                <button onClick={() => setLightbox(null)} className="absolute top-5 right-5 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-slate-700 hover:bg-white shadow-lg" title="關閉"><X className="w-5 h-5" /></button>
+              </div>
+            )}
           </div>
         );
       };
