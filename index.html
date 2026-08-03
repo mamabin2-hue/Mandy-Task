@@ -2548,6 +2548,9 @@
                </div>
                <button onClick={() => { const nv = !autoBackupOn; setAutoBackupOn(nv); try { localStorage.setItem(autoBackupOnKey, nv ? '1' : '0'); } catch (e) {} }} title="每天第一次開啟時，自動下載一份完整 JSON 備份到你的電腦" className={`shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg transition-colors ${autoBackupOn ? 'bg-emerald-600/80 text-white hover:bg-emerald-600' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>{autoBackupOn ? '開' : '關'}</button>
             </div>
+            <div className="px-4 pb-1 bg-slate-950/50">
+               <button onClick={() => { try { navigator.clipboard.writeText(uid); } catch (e) {} window.prompt('這是你的「同步 ID」（Jira 雲端同步設定要用），已幫你選好可直接複製：', uid); }} title="點一下複製你的同步 ID（uid）" className="w-full text-left text-[10px] text-slate-500 hover:text-sky-300 truncate">🔑 我的同步 ID：{uid}</button>
+            </div>
             <div className="px-4 pb-4 flex items-center justify-between gap-2 bg-slate-950/50">
                <span className="text-[11px] text-slate-500 truncate" title={userEmail}>{userEmail}</span>
                <button onClick={() => { if (confirm('確定要登出嗎？資料已存在雲端，下次登入還在。')) { try { localStorage.removeItem('taskflow_catmap'); localStorage.removeItem(noteDraftKey); } catch (e) {} signOut(fbAuth); } }}
