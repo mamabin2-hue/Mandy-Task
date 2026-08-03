@@ -1075,6 +1075,10 @@
       const [boardCompact, setBoardCompact] = useState(false); // 看板精簡/完整檢視
       const [isSidebarOpen, setIsSidebarOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true));
       const [isLoaded, setIsLoaded] = useState(false);
+      const autoBackupKey = 'mt_last_autobackup_' + (uid || 'anon');
+      const autoBackupOnKey = 'mt_autobackup_on_' + (uid || 'anon');
+      const [autoBackupOn, setAutoBackupOn] = useState(() => { try { return localStorage.getItem(autoBackupOnKey) !== '0'; } catch (e) { return true; } });
+      const [lastAutoBackup, setLastAutoBackup] = useState(() => { try { return localStorage.getItem('mt_last_autobackup_' + (uid || 'anon')) || ''; } catch (e) { return ''; } });
       
       const [tasks, setTasks] = useState([]);
       const [projects, setProjects] = useState(DEFAULT_PROJECTS);
@@ -1125,6 +1129,43 @@
         try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
         return { tasks, projects, users, notes, catMap, knowledge, deletedNotes };
       };
+
+      // 每日自動備份：每天第一次載入（且已成功讀到雲端）→ (1) 本機留滾動快照（可靠，可還原） (2) 盡力下載一份 JSON 到電腦
+      useEffect(() => {
+        if (!isLoaded || !uid || !autoBackupOn) return;
+        let today = '';
+        try { today = new Date().toISOString().split('T')[0]; } catch (e) { return; }
+        let last = '';
+        try { last = localStorage.getItem(autoBackupKey) || ''; } catch (e) {}
+        if (last === today) return;
+        const payload = buildLocalPayload();
+        // 資料還沒讀進來 → 先不備份，避免存到空檔
+        if ((!payload.tasks || payload.tasks.length === 0) && (!payload.notes || payload.notes.length === 0)) return;
+        const json = JSON.stringify({ ...payload, _autoBackupAt: new Date().toISOString() }, null, 2);
+        // (1) 本機滾動快照：保留最近 7 天，這步一定會成功，之後可從「還原資料」或手動取用
+        let snapshotOk = false;
+        try {
+          const snapKey = 'mt_backup_snapshots_' + uid;
+          let snaps = [];
+          try { snaps = JSON.parse(localStorage.getItem(snapKey) || '[]'); } catch (e) { snaps = []; }
+          snaps = snaps.filter(s => s && s.date !== today);
+          snaps.push({ date: today, json });
+          snaps = snaps.slice(-7);
+          localStorage.setItem(snapKey, JSON.stringify(snaps));
+          snapshotOk = true;
+        } catch (e) { snapshotOk = false; }
+        // (2) 盡力下載檔案到電腦（真瀏覽器會存到下載資料夾；被擋也不影響上面的本機快照）
+        try {
+          const blob = new Blob([json], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = `Mandy-Task-自動備份-${today}.json`;
+          document.body.appendChild(a); a.click(); document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        } catch (e) {}
+        // 只有在「至少本機快照成功」時才記為今日已備份，避免假成功
+        if (snapshotOk) { try { localStorage.setItem(autoBackupKey, today); } catch (e) {} setLastAutoBackup(today); }
+      }, [isLoaded, uid, autoBackupOn, tasks, notes]);
 
       // 立即把待寫資料寫回雲端（去抖到期、或關頁前 flush 都走這裡）
       flushSaveRef.current = () => {
@@ -2068,6 +2109,13 @@
             <div className="p-4 border-t border-slate-800 flex gap-2 bg-slate-950/50">
                <button onClick={handleExport} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="直接下載備份檔，無需確認"><Download className="w-3.5 h-3.5" /> 備份下載</button>
                <button onClick={() => fileInputRef.current.click()} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="上傳還原"><Upload className="w-3.5 h-3.5" /> 還原資料</button>
+            </div>
+            <div className="px-4 pb-2 flex items-center justify-between gap-2 bg-slate-950/50">
+               <div className="flex flex-col">
+                 <span className="text-[11px] font-black text-slate-400">每日自動備份</span>
+                 <span className="text-[10px] text-slate-500">{lastAutoBackup ? '上次：' + lastAutoBackup : '今天開啟時會自動存一份到電腦'}</span>
+               </div>
+               <button onClick={() => { const nv = !autoBackupOn; setAutoBackupOn(nv); try { localStorage.setItem(autoBackupOnKey, nv ? '1' : '0'); } catch (e) {} }} title="每天第一次開啟時，自動下載一份完整 JSON 備份到你的電腦" className={`shrink-0 text-[11px] font-black px-3 py-1.5 rounded-lg transition-colors ${autoBackupOn ? 'bg-emerald-600/80 text-white hover:bg-emerald-600' : 'bg-slate-700 text-slate-400 hover:bg-slate-600'}`}>{autoBackupOn ? '開' : '關'}</button>
             </div>
             <div className="px-4 pb-4 flex items-center justify-between gap-2 bg-slate-950/50">
                <span className="text-[11px] text-slate-500 truncate" title={userEmail}>{userEmail}</span>
