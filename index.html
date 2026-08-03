@@ -140,6 +140,26 @@
       return { ...task, id: task.id || Date.now().toString(), text, status, assignee, period, category, logs, timeSpent, subtasks, createdAt: task.createdAt || new Date().toISOString(), deadline: task.deadline || '' };
     };
 
+    // 歸檔自動建議分類：關鍵字 → 分類（依 HR 常見工作）
+    const ARCHIVE_KEYWORDS = [
+      { cat: '薪酬', kw: ['薪', '調薪', '敘薪', '獎金', 'pool', '津貼', '評薪', '久任'] },
+      { cat: '合約', kw: ['合約', '契約', '續約', '派遣', '承攬'] },
+      { cat: '離職/退休', kw: ['離職', '退休', '資遣', '優退', '離退', '面談'] },
+      { cat: '保險', kw: ['保險', '加保', '退保', '勞保', '健保', '團保', '理賠'] },
+      { cat: '人事異動', kw: ['異動', '調動', '升遷', '組織', '任用', '派駐'] },
+      { cat: '招募', kw: ['履歷', '應徵', '招募', '面試', '報到', '入職', '到職', '錄取'] },
+      { cat: '考勤', kw: ['出勤', '打卡', '考勤', '請假', '加班', '排班'] },
+      { cat: '績效', kw: ['績效', '考核', 'kpi', '評核', '目標'] },
+    ];
+    // 依內容關鍵字、或既有分類名稱，建議一個歸檔分類；找不到回退到 fallback
+    const suggestArchiveCategory = (text, extraCats, fallback) => {
+      const t = String(text || '').toLowerCase();
+      for (const m of ARCHIVE_KEYWORDS) { if (m.kw.some((k) => t.includes(String(k).toLowerCase()))) return m.cat; }
+      const cats = Array.isArray(extraCats) ? extraCats : [];
+      for (const c of cats) { if (c && t.includes(String(c).toLowerCase())) return String(c); }
+      return fallback || '';
+    };
+
     // 看板預設欄位（內建 3 欄：待辦/進行中/已完成）。「已完成」是完工錨點，統計/已完成頁/逾期都看 status==='done'
     const BUILTIN_COL_IDS = ['todo', 'in-progress', 'done'];
     const DEFAULT_BOARD_COLUMNS = [
@@ -926,7 +946,7 @@
     };
 
     // 已完成任務（唯讀，依分類分組彙整。平行 Agent 產出，整合時修正分類查詢改用名稱、已回歸測試）
-    const CompletedTasks = ({ tasks, projects }) => {
+    const CompletedTasks = ({ tasks, projects, onArchive }) => {
       const { useState, useMemo } = React;
       const safeArr = (v) => (Array.isArray(v) ? v : []);
       const safeNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -938,7 +958,7 @@
       // 本專案 task.category 存的是專案「名稱」→ 用名稱查（非 id）
       const projByName = useMemo(() => { const m = {}; projectList.forEach((p) => { if (p && p.name != null) m[String(p.name)] = p; }); return m; }, [projectList]);
       const catMeta = (catId) => { const p = projByName[String(catId)]; const name = (p && p.name) || (catId ? String(catId) : '未分類'); const color = (p && p.color) || '#94a3b8'; return { name, color }; };
-      const doneTasks = useMemo(() => safeArr(tasks).filter((t) => t && t.status === 'done'), [tasks]);
+      const doneTasks = useMemo(() => safeArr(tasks).filter((t) => t && t.status === 'done' && !t.archived), [tasks]);
       const [keyword, setKeyword] = useState('');
       const [catFilter, setCatFilter] = useState('__all__');
       const kw = keyword.trim().toLowerCase();
@@ -1052,6 +1072,7 @@
                                               <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-400" />{getDoneTimeLabel(t)}</span>
                                               <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-400" />{Math.round(getMinutes(t))} 分鐘</span>
                                               {t && t.assignee ? (<span className="inline-flex items-center gap-1 text-slate-600">{String(t.assignee)}</span>) : null}
+                                              {onArchive ? (<button onClick={(e) => { e.stopPropagation(); onArchive(t); }} title="歸檔到知識庫（自動建議分類）" className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 font-bold transition-colors"><BookOpen className="w-3.5 h-3.5" />歸檔到知識庫</button>) : null}
                                             </div>
                                           )}
                                         </div>
@@ -1208,6 +1229,32 @@
       const onboardedKey = 'mt_onboarded_' + (uid || 'anon');
       const [showWelcome, setShowWelcome] = useState(() => { try { return localStorage.getItem(onboardedKey) !== '1'; } catch (e) { return false; } });
       const dismissWelcome = () => { try { localStorage.setItem(onboardedKey, '1'); } catch (e) {} setShowWelcome(false); };
+      // 歸檔到知識庫：勾選/按鈕 → 跳確認框（自動建議分類，可改）→ 建知識頁
+      const [archiveTarget, setArchiveTarget] = useState(null); // { type:'note'|'task', item }
+      const [archiveCat, setArchiveCat] = useState('');
+      const openArchive = (type, item) => {
+        const text = (item && item.text) || '';
+        const existingCats = Array.from(new Set([...(Array.isArray(knowledge) ? knowledge : []).map((k) => k && k.category).filter(Boolean), ...projects.map((p) => p.name)]));
+        const fallback = type === 'task' ? (item.category || '') : (item.tag || '');
+        setArchiveCat(suggestArchiveCategory(text, existingCats, fallback));
+        setArchiveTarget({ type, item });
+      };
+      const archiveExistingCats = Array.from(new Set([...(Array.isArray(knowledge) ? knowledge : []).map((k) => k && k.category).filter(Boolean), ...projects.map((p) => p.name)]));
+      const doArchive = () => {
+        if (!archiveTarget) return;
+        const { type, item } = archiveTarget;
+        const cat = (archiveCat || '').trim() || '未分類';
+        const now = Date.now();
+        const title = String((item && item.text) || '(未命名)').split('\n')[0].slice(0, 60);
+        const content = type === 'note'
+          ? String(item.text || '')
+          : [item.text || '', item.note ? ('備註：' + item.note) : '', item.deadline ? ('截止：' + item.deadline) : '', item.assignee ? ('負責：' + item.assignee) : ''].filter(Boolean).join('\n');
+        const page = { id: 'kb_' + now + '_' + Math.random().toString(36).slice(2, 8), title, category: cat, content, updatedAt: now };
+        setKnowledge([...(Array.isArray(knowledge) ? knowledge : []), page]);
+        if (type === 'note') { setNotes(notes.filter((n) => n.id !== item.id)); }   // 歸檔＝內容進知識庫，便利貼撤出
+        else { setTasks(tasks.map((t) => t.id === item.id ? { ...t, archived: true } : t)); }
+        setArchiveTarget(null);
+      };
 
       // 貼圖：把壓縮後的圖片加進某張便利貼，加前檢查整份資料大小避免撐爆雲端單檔 1MB
       const addImageToNote = async (noteId, blob) => {
@@ -1797,6 +1844,7 @@
                      <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
                         <button onClick={() => setNotes(notes.map(n => n.id === note.id ? { ...n, mailOutlook: !n.mailOutlook } : n))} title={note.mailOutlook ? '已標記：電腦上執行「Outlook草稿」程式時會用桌面 Outlook 開這則草稿（再點取消）' : '標記用桌面 Outlook 開草稿（執行 Outlook草稿程式時會開現場 Outlook，不用雲端版）'} className={`w-7 h-7 rounded-full flex items-center justify-center shadow-sm ${note.mailOutlook ? 'bg-indigo-600 text-white' : 'bg-white/60 hover:bg-indigo-500 hover:text-white text-slate-500'}`}><Mail className="w-3.5 h-3.5" /></button>
                         <button onClick={() => { if (!(note.text || '').trim()) return; if (window.confirm('把這則筆記送到匯報清單（會建立一則任務' + (note.tag ? '，匯報給 ' + note.tag : '') + '）？')) { setTasks([healTaskData({ id: Date.now().toString(), text: note.text, assignee: note.tag || '', status: 'todo', category: '', period: '不指定時段', createdAt: new Date().toISOString() }), ...tasks]); } }} title="送到匯報清單（建立任務）" className="w-7 h-7 bg-white/60 hover:bg-emerald-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Send className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => openArchive('note', note)} title="歸檔到知識庫（自動建議分類）" className="w-7 h-7 bg-white/60 hover:bg-amber-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><BookOpen className="w-3.5 h-3.5" /></button>
                         <button onClick={() => { setNotes(notes.filter(n => n.id !== note.id)); setDeletedNotes([{ ...note, deletedAt: new Date().toISOString() }, ...deletedNotes]); }} title="刪除（可到回收桶復原）" className="w-7 h-7 bg-white/60 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Trash2 className="w-3.5 h-3.5" /></button>
                      </div>
                   </div>
@@ -2357,6 +2405,27 @@
             </div>
           )}
 
+          {archiveTarget && (
+            <div className="fixed inset-0 z-[95] bg-black/50 flex items-center justify-center p-4 animate-in fade-in duration-150" onClick={() => setArchiveTarget(null)}>
+              <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl p-6" onClick={(e) => e.stopPropagation()}>
+                <h2 className="text-lg font-black text-slate-800 mb-1 flex items-center gap-2"><BookOpen className="w-5 h-5 text-indigo-600" /> 歸檔到知識庫</h2>
+                <p className="text-xs text-slate-400 mb-4">會把這則{archiveTarget.type === 'note' ? '便利貼' : '任務'}存進知識庫，並{archiveTarget.type === 'note' ? '從便利貼撤出' : '標記為已歸檔'}。</p>
+                <div className="bg-slate-50 rounded-2xl p-3 mb-4 text-sm font-bold text-slate-700 max-h-28 overflow-y-auto break-words whitespace-pre-wrap">{String((archiveTarget.item && archiveTarget.item.text) || '(未命名)')}</div>
+                <label className="text-sm font-bold text-slate-600">歸到哪個分類 <span className="text-[11px] font-normal text-indigo-500">（系統已自動建議，可改）</span>
+                  <input list="archiveCatList" value={archiveCat} onChange={(e) => setArchiveCat(e.target.value)} className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 text-slate-700" placeholder="輸入或選擇分類" />
+                  <datalist id="archiveCatList">
+                    {archiveExistingCats.map((c) => <option key={'e' + c} value={c} />)}
+                    {ARCHIVE_KEYWORDS.map((m) => <option key={'k' + m.cat} value={m.cat} />)}
+                  </datalist>
+                </label>
+                <div className="flex gap-2 mt-5">
+                  <button onClick={() => setArchiveTarget(null)} className="flex-1 py-2.5 rounded-xl bg-slate-100 text-slate-600 font-black hover:bg-slate-200 transition-colors">取消</button>
+                  <button onClick={doArchive} className="flex-1 py-2.5 rounded-xl bg-indigo-600 text-white font-black hover:bg-indigo-700 transition-colors">歸檔</button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {isSidebarOpen && <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)} />}
           <div className={`flex flex-col bg-slate-900 text-slate-300 transition-all duration-300 h-full border-r border-slate-800 shrink-0 ${isSidebarOpen ? 'w-64 fixed inset-y-0 left-0 z-50 lg:static lg:z-40' : 'w-0 overflow-hidden opacity-0'}`}>
             <div className="h-20 flex items-center px-6 border-b border-slate-800 shrink-0 bg-slate-950/50">
@@ -2488,7 +2557,7 @@
                 {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} />}
                 {activeView === 'dedup' && <DuplicateFinder tasks={tasks} setTasks={setTasks} />}
                 {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} />}
-                {activeView === 'done' && <CompletedTasks tasks={tasks} projects={projects} />}
+                {activeView === 'done' && <CompletedTasks tasks={tasks} projects={projects} onArchive={(t) => openArchive('task', t)} />}
                 {activeView === 'notes' && renderNotes()}
                 {activeView === 'recycle' && <RecycleBin deletedNotes={deletedNotes} setDeletedNotes={setDeletedNotes} notes={notes} setNotes={setNotes} />}
                 {activeView === 'report' && renderReport()}
