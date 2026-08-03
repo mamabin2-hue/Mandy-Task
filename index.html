@@ -15,6 +15,10 @@
     .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; border: 3px solid transparent; background-clip: content-box; }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
     body { font-family: "Microsoft JhengHei", "微軟正黑體", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f8fafc; }
+    /* 觸控裝置沒有 hover：強制顯示所有「滑鼠移上去才浮現」的動作鈕（刪除/編輯/移除圖等），否則手機摸不到 */
+    @media (hover: none) {
+      [class*="group-hover"][class*="opacity-100"] { opacity: 1 !important; }
+    }
   </style>
 
   <!-- 設定 React 與相關套件的載入路徑 -->
@@ -438,6 +442,7 @@
       const doneCount = T.filter((t) => t && t.status === 'done').length;
       const inProgCount = T.filter((t) => t && t.status === 'in-progress').length;
       const todoCount = T.filter((t) => t && t.status === 'todo').length;
+      const otherCount = Math.max(0, total - doneCount - inProgCount - todoCount); // 在自訂看板欄位裡的任務（status 非三內建值）
       const completeRate = total ? Math.round((doneCount / total) * 100) : 0;
       const isOverdue = (t) => { if (!t || t.status === 'done') return false; const dl = safeDate(t.deadline); return dl ? startOfDay(dl) < today0 : false; };
       const overdueCount = T.filter(isOverdue).length;
@@ -465,7 +470,7 @@
         </div>
       );
       const StatusDonut = () => {
-        const segs = [ { name: '待辦', value: todoCount, color: '#94a3b8' }, { name: '進行中', value: inProgCount, color: '#6366f1' }, { name: '已完成', value: doneCount, color: '#22c55e' } ].filter((s) => s.value > 0);
+        const segs = [ { name: '待辦', value: todoCount, color: '#94a3b8' }, { name: '進行中', value: inProgCount, color: '#6366f1' }, { name: '已完成', value: doneCount, color: '#22c55e' }, { name: '其他欄位', value: otherCount, color: '#f59e0b' } ].filter((s) => s.value > 0);
         const sum = segs.reduce((a, s) => a + s.value, 0);
         if (!sum) return <Empty text="尚無任務" />;
         const cx = 90, cy = 90, rOut = 78, rIn = 50;
@@ -491,7 +496,7 @@
               <text x={cx} y={cy + 16} textAnchor="middle" fontSize="11" fontWeight="700" fill="#94a3b8">完成率</text>
             </svg>
             <div className="flex flex-col gap-2 w-full">
-              {[ { name: '待辦', value: todoCount, color: '#94a3b8' }, { name: '進行中', value: inProgCount, color: '#6366f1' }, { name: '已完成', value: doneCount, color: '#22c55e' } ].map((s, i) => (
+              {[ { name: '待辦', value: todoCount, color: '#94a3b8' }, { name: '進行中', value: inProgCount, color: '#6366f1' }, { name: '已完成', value: doneCount, color: '#22c55e' }, { name: '其他欄位', value: otherCount, color: '#f59e0b' } ].filter((s) => s.value > 0).map((s, i) => (
                 <div key={i} className="flex items-center gap-2 text-sm">
                   <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
                   <span className="font-bold text-slate-600 flex-1">{s.name}</span>
@@ -1197,6 +1202,8 @@
       const canWriteRef = useRef(false);     // 只有「成功讀過一次雲端」後才允許寫；讀失敗時保持 false，避免用空資料覆蓋雲端
       const lastWriteIdRef = useRef(null);   // 標記「這筆是我自己寫的」，用來精準略過自己的回音（比 JSON 比對可靠）
       const flushSaveRef = useRef(() => {}); // 指向最新的「立即存檔」函式，供關頁前 flush 呼叫
+      const oversizeAlertedRef = useRef(false); // 已對「逼近 1MB 上限」提示過，避免每次都跳
+      const localJsonRef = useRef(null);     // 目前本地內容快照（給 onSnapshot 判斷「本地是否有未同步變更」，避免 stale closure）
       const [syncStatus, setSyncStatus] = useState('idle'); // idle | saving | saved | error
 
       // 產生目前本地完整內容（供比對與寫入共用）
@@ -1217,8 +1224,11 @@
         const payload = buildLocalPayload();
         // 資料還沒讀進來 → 先不備份，避免存到空檔
         if ((!payload.tasks || payload.tasks.length === 0) && (!payload.notes || payload.notes.length === 0)) return;
+        // 先記「今日已嘗試」→ 無論後續快照/下載成功與否，今天都不再重跑
+        // （修：快照塞爆 localStorage 時、日期記不上 → 每次改動都重觸發下載的洪水 bug）
+        try { localStorage.setItem(autoBackupKey, today); } catch (e) {}
         const json = JSON.stringify({ ...payload, _autoBackupAt: new Date().toISOString() }, null, 2);
-        // (1) 本機滾動快照：保留最近 7 天，這步一定會成功，之後可從「還原資料」或手動取用
+        // (1) 本機滾動快照：保留最近 3 天；localStorage 配額不足時逐步丟最舊的直到存得下
         let snapshotOk = false;
         try {
           const snapKey = 'mt_backup_snapshots_' + uid;
@@ -1226,9 +1236,11 @@
           try { snaps = JSON.parse(localStorage.getItem(snapKey) || '[]'); } catch (e) { snaps = []; }
           snaps = snaps.filter(s => s && s.date !== today);
           snaps.push({ date: today, json });
-          snaps = snaps.slice(-7);
-          localStorage.setItem(snapKey, JSON.stringify(snaps));
-          snapshotOk = true;
+          snaps = snaps.slice(-3);
+          while (snaps.length) {
+            try { localStorage.setItem(snapKey, JSON.stringify(snaps)); snapshotOk = true; break; }
+            catch (e) { snaps.shift(); }   // 配額不足 → 丟最舊一份再試
+          }
         } catch (e) { snapshotOk = false; }
         // (2) 盡力下載檔案到電腦（真瀏覽器會存到下載資料夾；被擋也不影響上面的本機快照）
         try {
@@ -1239,8 +1251,7 @@
           document.body.appendChild(a); a.click(); document.body.removeChild(a);
           URL.revokeObjectURL(url);
         } catch (e) {}
-        // 只有在「至少本機快照成功」時才記為今日已備份，避免假成功
-        if (snapshotOk) { try { localStorage.setItem(autoBackupKey, today); } catch (e) {} setLastAutoBackup(today); }
+        if (snapshotOk) setLastAutoBackup(today);
       }, [isLoaded, uid, autoBackupOn, tasks, notes]);
 
       // 立即把待寫資料寫回雲端（去抖到期、或關頁前 flush 都走這裡）
@@ -1250,13 +1261,30 @@
         const payload = buildLocalPayload();
         const localJson = JSON.stringify(payload);
         if (localJson === syncedJsonRef.current) return;       // 沒有實質變化
-        syncedJsonRef.current = localJson;
+        // 大小保護：Firestore 單文件上限約 1MB（UTF-8 位元組）。逼近就擋下並提示，避免寫入靜默失敗後停止同步
+        let bytes = localJson.length;
+        try { bytes = new Blob([localJson]).size; } catch (e) {}
+        if (bytes > 1000000) {
+          setSyncStatus('error');
+          if (!oversizeAlertedRef.current) { oversizeAlertedRef.current = true; window.alert('資料量已接近雲端單筆上限（約 1MB），新的變更暫時無法同步到雲端。\n請刪掉一些便利貼貼圖、或到「回收桶」按「清空回收桶」釋放空間，之後會自動恢復同步。'); }
+          return;   // 不推進 syncedJsonRef → 釋放空間後會自動重試
+        }
+        oversizeAlertedRef.current = false;
+        const prevSynced = syncedJsonRef.current;
+        syncedJsonRef.current = localJson;                     // 樂觀推進，避免寫入在途期間重複觸發
         const writeId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         lastWriteIdRef.current = writeId;
         setSyncStatus('saving');
         setDoc(doc(fbDb, 'users', uid, 'state', 'main'), { ...payload, writeId, updatedAt: Date.now() })
           .then(() => setSyncStatus('saved'))
-          .catch(e => { console.error("Sync save error:", e); setSyncStatus('error'); });
+          .catch(e => {
+            console.error("Sync save error:", e);
+            setSyncStatus('error');
+            // 寫入失敗 → 回滾基準，讓這筆變更之後會被重試，不致靜默遺失
+            if (syncedJsonRef.current === localJson) syncedJsonRef.current = prevSynced;
+            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+            saveTimerRef.current = setTimeout(() => flushSaveRef.current(), 5000);
+          });
       };
 
       // 雲端同步（讀）：訂閱這位使用者的資料，任何裝置的改動都即時同步過來。
@@ -1275,7 +1303,9 @@
             if (snap.exists()) {
               const d = snap.data() || {};
               // 若這筆正是我自己剛寫上去的（writeId 相符）→ state 已是最新，不需再套用
-              if (!(d.writeId && d.writeId === lastWriteIdRef.current)) {
+              // 本地已有尚未同步的變更（且非首次載入）→ 保留本地（正在編輯的內容不被遠端整包覆蓋、打字不被回捲）；本地變更會由去抖寫入推上雲端
+              const localDirty = canWriteRef.current && localJsonRef.current && localJsonRef.current !== syncedJsonRef.current;
+              if (!(d.writeId && d.writeId === lastWriteIdRef.current) && !localDirty) {
                 const payload = {
                   tasks: Array.isArray(d.tasks) ? d.tasks : [],
                   projects: Array.isArray(d.projects) && d.projects.length ? d.projects : DEFAULT_PROJECTS,
@@ -1319,7 +1349,9 @@
       // 雲端同步（寫）：資料變動 → 去抖 800ms 後寫回；只有成功讀過雲端才會寫。
       useEffect(() => {
         if (!isLoaded || !uid || !canWriteRef.current) return;
-        if (JSON.stringify(buildLocalPayload()) === syncedJsonRef.current) return;  // 沒有實質變化
+        const localJson = JSON.stringify(buildLocalPayload());
+        localJsonRef.current = localJson;                       // 供 onSnapshot 判斷本地是否有未同步變更
+        if (localJson === syncedJsonRef.current) return;         // 沒有實質變化
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(() => flushSaveRef.current(), 800);
         return () => { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); } };
@@ -1750,10 +1782,12 @@
           return (t[k] || '').toString();
         };
         // Excel 式欄位篩選：各欄可勾選要顯示的值（空陣列 = 不篩選）
-        const statusLabel = (s) => s === 'done' ? '已完成' : s === 'in-progress' ? '進行中' : '待辦';
+        // 狀態標題依 boardColumns 動態解析（含自訂看板欄位），對不到才退回內建名稱
+        const statusLabel = (s) => { const c = boardColumns.find(x => x.id === s); if (c) return c.title; return s === 'done' ? '已完成' : s === 'in-progress' ? '進行中' : '待辦'; };
         const distinct = (fn) => Array.from(new Set(tasks.map(fn).map(v => v == null ? '' : v))).sort((a, b) => String(a).localeCompare(String(b), 'zh-Hant'));
+        const statusOptions = Array.from(new Set([...boardColumns.map(c => c.id), ...tasks.map(t => t.status || 'todo')]));
         const filterCols = {
-          status: { label: '狀態', options: ['todo', 'in-progress', 'done'], render: statusLabel, get: (t) => t.status || 'todo' },
+          status: { label: '狀態', options: statusOptions, render: statusLabel, get: (t) => t.status || 'todo' },
           category: { label: '專案分類', options: distinct(t => t.category || ''), render: (v) => v || '無分類', get: (t) => t.category || '' },
           period: { label: '時段', options: distinct(t => t.period || '不指定時段'), render: (v) => v || '不指定時段', get: (t) => t.period || '不指定時段' },
           assignee: { label: '匯報給', options: distinct(t => t.assignee || ''), render: (v) => v || '（未設定）', get: (t) => t.assignee || '' },
@@ -1822,7 +1856,7 @@
                 <tbody className="divide-y divide-slate-100">
                   {rows.map(t => (
                     <tr key={t.id} className="hover:bg-slate-50 transition-colors group">
-                      <td className="py-4 pl-4">{t.status === 'done' ? <span className="text-emerald-500 font-bold text-xs bg-emerald-50 px-2 py-1 rounded border border-emerald-100">已完成</span> : t.status === 'in-progress' ? <span className="text-indigo-500 font-bold text-xs bg-indigo-50 px-2 py-1 rounded border border-indigo-100">進行中</span> : <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-1 rounded border border-slate-200">待辦</span>}</td>
+                      <td className="py-4 pl-4">{t.status === 'done' ? <span className="text-emerald-500 font-bold text-xs bg-emerald-50 px-2 py-1 rounded border border-emerald-100">已完成</span> : t.status === 'in-progress' ? <span className="text-indigo-500 font-bold text-xs bg-indigo-50 px-2 py-1 rounded border border-indigo-100">進行中</span> : (t.status && t.status !== 'todo' && boardColumns.find(c => c.id === t.status)) ? <span className="text-amber-600 font-bold text-xs bg-amber-50 px-2 py-1 rounded border border-amber-100">{statusLabel(t.status)}</span> : <span className="text-slate-400 font-bold text-xs bg-slate-100 px-2 py-1 rounded border border-slate-200">待辦</span>}</td>
                       <td className={`py-4 font-bold ${t.status==='done'?'text-slate-400 line-through':'text-slate-700'}`}>{t.text}</td>
                       <td className="py-4 font-bold text-sm" style={{color: projects.find(p=>p.name===t.category)?.color || '#94a3b8'}}>{t.category || '無分類'}</td>
                       <td className="py-4 font-bold text-slate-500 text-sm">{t.period}</td>
@@ -2173,7 +2207,7 @@
           <h3 className="text-2xl font-black text-slate-800 mt-8 mb-4 px-2">🚑 疑難雜症急救指南</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-red-600 mb-2 flex items-center gap-2">任務突然不見了？</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">1. 檢查是否移到了「已完成」超過 7 天，可至「任務總表」中尋找。<br/>2. 檢查左側邊欄是否選到了單一專案，請切換回「所有工作專案 (ALL)」。</p></div>
-            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-amber-600 mb-2 flex items-center gap-2">時數輸入錯誤怎麼辦？</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">請將滑鼠移到任務卡片下方的「投入歷程」紀錄上，最右側會浮現「垃圾桶」圖示，點擊即可刪除該筆錯誤的時間，總時數會自動重新計算。</p></div>
+            <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-amber-600 mb-2 flex items-center gap-2">時數輸入錯誤怎麼辦？</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">在任務卡片下方的「投入歷程」紀錄上，最右側的「垃圾桶」圖示（電腦版滑鼠移上去浮現、手機版直接顯示），點擊即可刪除該筆錯誤的時間，總時數會自動重新計算。</p></div>
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-slate-700 mb-2 flex items-center gap-2">專案名稱打錯想修改</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">請至「系統設定」，點擊專案旁邊的鉛筆圖示，修改完成後按下 Enter 鍵即可。全系統舊任務的標籤會自動同步為新名稱。</p></div>
             <div className="bg-white p-8 rounded-3xl border border-slate-200 shadow-sm"><h4 className="text-lg font-black text-teal-600 mb-2 flex items-center gap-2">畫面卡住或異常</h4><p className="text-slate-600 font-bold text-sm leading-relaxed">若持續異常，請點擊左下角「備份下載」將 JSON 檔案匯出，重新整理網頁後，再使用「還原資料」匯入即可恢復正常。</p></div>
           </div>
@@ -2270,7 +2304,7 @@
             </div>
             <div className="px-4 pb-4 flex items-center justify-between gap-2 bg-slate-950/50">
                <span className="text-[11px] text-slate-500 truncate" title={userEmail}>{userEmail}</span>
-               <button onClick={() => { if (confirm('確定要登出嗎？資料已存在雲端，下次登入還在。')) signOut(fbAuth); }}
+               <button onClick={() => { if (confirm('確定要登出嗎？資料已存在雲端，下次登入還在。')) { try { localStorage.removeItem('taskflow_catmap'); localStorage.removeItem(noteDraftKey); } catch (e) {} signOut(fbAuth); } }}
                  className="shrink-0 text-[11px] text-slate-400 hover:text-rose-400 font-black">登出</button>
             </div>
           </div>
