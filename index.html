@@ -136,7 +136,7 @@
     };
 
     // 任務卡片元件
-    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog }) => {
+    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, compact }) => {
       const isRunning = activeTimer === task.id;
       const projectInfo = projects.find(p => p.name === task.category);
       const projectColor = projectInfo?.color || '#cbd5e1';
@@ -201,6 +201,7 @@
           <div className="p-4 flex flex-col gap-3">
             <textarea ref={titleRef} className="w-full text-base font-black text-slate-800 bg-transparent border-none outline-none resize-none placeholder-slate-300 overflow-hidden" style={{ minHeight: '32px' }} value={task.text || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target)} onChange={(e) => updateTask(task.id, 'text', e.target.value)} placeholder="輸入任務名稱..." />
 
+            {!compact && (<>
             <div className="flex flex-col gap-0 border border-purple-100 rounded-xl overflow-hidden bg-purple-50/20">
                <div className="flex items-center justify-between w-full p-2 bg-purple-50 border-b border-purple-100">
                  <div className="flex items-center gap-1.5 text-purple-600 text-xs font-black px-2"><User className="w-3.5 h-3.5" /> 匯報對象</div>
@@ -248,6 +249,7 @@
                  })}
               </div>
             </div>
+            </>)}
           </div>
 
           <div className="p-3 bg-slate-50/80 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 rounded-b-xl">
@@ -990,6 +992,7 @@
       const [activeView, setActiveView] = useState('board');
       const [searchQuery, setSearchQuery] = useState('');
       const [sheetSort, setSheetSort] = useState({ key: 'createdAt', dir: 'desc' }); // 任務總表排序
+      const [boardCompact, setBoardCompact] = useState(false); // 看板精簡/完整檢視
       const [isSidebarOpen, setIsSidebarOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true));
       const [isLoaded, setIsLoaded] = useState(false);
       
@@ -1356,6 +1359,9 @@
                     <Calendar className="w-4 h-4 text-slate-400" />
                     <input type="date" className="text-sm font-bold text-slate-600 bg-transparent outline-none cursor-pointer" value={newTaskDeadline} onChange={(e) => setNewTaskDeadline(e.target.value)} />
                  </div>
+                 <button onClick={() => setBoardCompact(v => !v)} title={boardCompact ? '切換為完整檢視' : '切換為精簡檢視（只看標題與日期）'} className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold border shadow-sm transition-colors ${boardCompact ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>
+                    <ListIcon className="w-4 h-4" /> {boardCompact ? '精簡' : '完整'}
+                 </button>
               </div>
             </div>
             {searching && filtered.length === 0 && (
@@ -1378,7 +1384,7 @@
                   <div className="flex flex-col gap-0 min-h-[200px]">
                      {col.data.map(task => (
                         <div key={task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)}>
-                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} />
+                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} />
                         </div>
                      ))}
                      {col.data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">{searching ? '查無符合' : '無任務或拖曳至此'}</div>}
