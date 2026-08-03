@@ -1,5 +1,6 @@
 _不要上傳/
 _版本備份/
 _LINE提醒/
+_Jira同步/
 *.lnk
 node_modules/

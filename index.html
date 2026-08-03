@@ -297,6 +297,11 @@
               </div>
             </div>
 
+            <button type="button" onClick={(e) => { e.stopPropagation(); updateTask(task.id, 'syncToJira', !task.syncToJira); }} onDragStart={stopDragAndDrop} title="勾選後，電腦上的同步程式會把這筆任務建立到你的 Jira（單向）" className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-bold transition-colors ${task.syncToJira ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-slate-500 border-slate-200 hover:border-sky-300'}`}>
+              <span className={`w-4 h-4 rounded flex items-center justify-center border ${task.syncToJira ? 'bg-white border-white' : 'border-slate-300'}`}>{task.syncToJira && <Check className="w-3 h-3 text-sky-600" />}</span>
+              同步到 Jira{task.jiraKey ? `（已建立 ${task.jiraKey}）` : task.syncToJira ? '（待下次同步）' : ''}
+            </button>
+
             <div className="mt-2 flex flex-col gap-2 pt-3 border-t border-slate-100">
               <div className="text-xs font-bold text-slate-400 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> 投入歷程與補登</div>
               <div className="flex flex-col gap-2 w-full">
