@@ -1209,6 +1209,7 @@
       const [sheetFilters, setSheetFilters] = useState({ status: [], category: [], period: [], assignee: [] }); // 任務總表 Excel 式欄位篩選（空=全部）
       const [openFilter, setOpenFilter] = useState(null); // 目前展開的篩選欄
       const [boardCompact, setBoardCompact] = useState(() => { try { return localStorage.getItem('mt_board_compact') !== '0'; } catch (e) { return true; } }); // 看板精簡/完整檢視（預設精簡：只看任務名+重點）
+      const [reportCompact, setReportCompact] = useState(() => { try { return localStorage.getItem('mt_report_compact') !== '0'; } catch (e) { return true; } }); // 匯報清單精簡/完整（預設精簡）
       const [isSidebarOpen, setIsSidebarOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true));
       const [isLoaded, setIsLoaded] = useState(false);
       const autoBackupKey = 'mt_last_autobackup_' + (uid || 'anon');
@@ -1914,24 +1915,32 @@
           <div className="w-full space-y-8 animate-in fade-in duration-300 pb-10">
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex items-center gap-3">
                <div className="bg-purple-100 p-2.5 rounded-xl"><MessageSquare className="w-6 h-6 text-purple-600" /></div>
-               <div>
+               <div className="flex-1">
                   <h2 className="text-xl font-black text-slate-800">匯報清單 (One-on-One)</h2>
-                  <p className="text-slate-500 font-bold mt-1 text-sm">自動過濾所有標記了「匯報對象」且尚未完成的任務。</p>
+                  <p className="text-slate-500 font-bold mt-1 text-sm">自動彙整標記了「匯報對象」的未完成任務，以及標了「相關人員」的便利貼。</p>
                </div>
+               <button onClick={() => setReportCompact(v => { const nv = !v; try { localStorage.setItem('mt_report_compact', nv ? '1' : '0'); } catch (e) {} return nv; })} className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold border shadow-sm transition-colors ${reportCompact ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}><ListIcon className="w-4 h-4" /> {reportCompact ? '精簡' : '完整'}</button>
             </div>
             {Object.entries(grouped).map(([user, userTasks]) => {
-               if (userTasks.length === 0) return null;
+               const userNotes = user === 'All' ? [] : (Array.isArray(notes) ? notes.filter(n => n && n.tag === user) : []);
+               if (userTasks.length === 0 && userNotes.length === 0) return null;
                const displayName = user === 'All' ? 'All (所有主管)' : user;
                return (
                  <div key={user} className="flex flex-col gap-4">
-                    <h3 className="text-lg font-black text-purple-800 flex items-center gap-2 border-b border-purple-100 pb-2"><User className="w-5 h-5" /> 匯報給：{displayName} <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded-full">{userTasks.length}</span></h3>
+                    <h3 className="text-lg font-black text-purple-800 flex items-center gap-2 border-b border-purple-100 pb-2"><User className="w-5 h-5" /> 匯報給：{displayName} <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded-full">{userTasks.length + userNotes.length}</span></h3>
                     <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                       {userTasks.map(task => <TaskCard key={task.id} task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} />)}
+                       {userTasks.map(task => <TaskCard key={task.id} task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={reportCompact} onArchive={(t) => openArchive('task', t)} />)}
+                       {userNotes.map(note => (
+                         <div key={note.id} className={`p-4 rounded-2xl border border-black/5 shadow-sm flex flex-col gap-2 ${note.color || 'bg-yellow-100/70'}`}>
+                           <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-500"><PenSquare className="w-3.5 h-3.5" /> 便利貼</div>
+                           <p className="text-sm font-bold text-slate-700 break-words whitespace-pre-wrap leading-relaxed line-clamp-6">{note.text || '(空白便利貼)'}</p>
+                         </div>
+                       ))}
                     </div>
                  </div>
                )
             })}
-            {reportTasks.length === 0 && <div className="w-full py-12 text-center text-slate-400 font-bold bg-white rounded-3xl border border-dashed border-slate-200 shadow-sm">目前沒有需要匯報的任務</div>}
+            {reportTasks.length === 0 && !(Array.isArray(notes) && notes.some(n => n && n.tag)) && <div className="w-full py-12 text-center text-slate-400 font-bold bg-white rounded-3xl border border-dashed border-slate-200 shadow-sm">目前沒有需要匯報的任務或便利貼</div>}
           </div>
         );
       };
