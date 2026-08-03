@@ -136,6 +136,28 @@
       return { ...task, id: task.id || Date.now().toString(), text, status, assignee, period, category, logs, timeSpent, subtasks, createdAt: task.createdAt || new Date().toISOString(), deadline: task.deadline || '' };
     };
 
+    // 看板預設欄位（內建 3 欄：待辦/進行中/已完成）。「已完成」是完工錨點，統計/已完成頁/逾期都看 status==='done'
+    const BUILTIN_COL_IDS = ['todo', 'in-progress', 'done'];
+    const DEFAULT_BOARD_COLUMNS = [
+      { id: 'todo', title: '待辦', builtin: true },
+      { id: 'in-progress', title: '進行中', builtin: true },
+      { id: 'done', title: '已完成', builtin: true },
+    ];
+    const normalizeColumns = (cols) => {
+      const arr = Array.isArray(cols) ? cols.filter(c => c && c.id && c.title != null) : [];
+      if (!arr.length) return DEFAULT_BOARD_COLUMNS;
+      let result = arr.map(c => ({ id: String(c.id), title: String(c.title), builtin: BUILTIN_COL_IDS.includes(String(c.id)) }));
+      // 保底：三個內建欄位一定要在（缺了補回，todo 置前、done 置後）
+      if (!result.some(c => c.id === 'todo')) result.unshift({ id: 'todo', title: '待辦', builtin: true });
+      if (!result.some(c => c.id === 'in-progress')) {
+        const di = result.findIndex(c => c.id === 'done');
+        const item = { id: 'in-progress', title: '進行中', builtin: true };
+        if (di >= 0) result.splice(di, 0, item); else result.push(item);
+      }
+      if (!result.some(c => c.id === 'done')) result.push({ id: 'done', title: '已完成', builtin: true });
+      return result;
+    };
+
     // 貼圖壓縮：讀圖→畫到 canvas 縮到 maxDim→輸出小 JPEG dataURL（控制雲端單檔大小）
     const compressImage = (fileOrBlob, maxDim = 320, quality = 0.55) => new Promise((resolve, reject) => {
       try {
@@ -1109,6 +1131,7 @@
       const [notes, setNotes] = useState([]);
       const [knowledge, setKnowledge] = useState([]);
       const [deletedNotes, setDeletedNotes] = useState([]);
+      const [boardColumns, setBoardColumns] = useState(DEFAULT_BOARD_COLUMNS);
       const noteDraftKey = 'mt_note_draft_' + (uid || 'anon');
       const [noteDraftSaved, setNoteDraftSaved] = useState(false);
       const [lightbox, setLightbox] = useState(null); // 放大檢視的圖片 dataURL
@@ -1180,7 +1203,7 @@
       const buildLocalPayload = () => {
         let catMap = {};
         try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
-        return { tasks, projects, users, notes, catMap, knowledge, deletedNotes };
+        return { tasks, projects, users, notes, catMap, knowledge, deletedNotes, boardColumns };
       };
 
       // 每日自動備份：每天第一次載入（且已成功讀到雲端）→ (1) 本機留滾動快照（可靠，可還原） (2) 盡力下載一份 JSON 到電腦
@@ -1260,7 +1283,8 @@
                   notes: Array.isArray(d.notes) ? d.notes : [],
                   catMap: d.catMap || {},
                   knowledge: Array.isArray(d.knowledge) ? d.knowledge : [],
-                  deletedNotes: Array.isArray(d.deletedNotes) ? d.deletedNotes : []
+                  deletedNotes: Array.isArray(d.deletedNotes) ? d.deletedNotes : [],
+                  boardColumns: normalizeColumns(d.boardColumns)
                 };
                 const healedTasks = payload.tasks.map(t => healTaskData(t));
                 const mergedUsers = [...new Set([...DEFAULT_USERS, ...payload.users])];
@@ -1271,8 +1295,9 @@
                 setNotes(payload.notes);
                 setKnowledge(payload.knowledge);
                 setDeletedNotes(payload.deletedNotes);
+                setBoardColumns(payload.boardColumns);
                 // 記錄「已與雲端一致」的 healed 版本（key 順序須與 buildLocalPayload 一致），寫效果才不會多寫一次
-                syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap, knowledge: payload.knowledge, deletedNotes: payload.deletedNotes });
+                syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap, knowledge: payload.knowledge, deletedNotes: payload.deletedNotes, boardColumns: payload.boardColumns });
               }
             }
             // exists 或 not-exists（首次登入）都算「成功讀到」→ 之後才允許寫入
@@ -1298,7 +1323,7 @@
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(() => flushSaveRef.current(), 800);
         return () => { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); } };
-      }, [tasks, projects, users, notes, knowledge, deletedNotes, isLoaded, uid]);
+      }, [tasks, projects, users, notes, knowledge, deletedNotes, boardColumns, isLoaded, uid]);
 
       useEffect(() => {
         let interval = null;
@@ -1550,26 +1575,33 @@
               </div>
             )}
             <div className="flex flex-col lg:flex-row gap-6 items-start w-full pb-10">
-              {[
-                { id: 'todo', title: '待辦', icon: Square, data: orderColumn(filtered.filter(t=>t.status==='todo')), bg: 'bg-slate-50/80 border-slate-200', text: 'text-slate-700', iconColor: 'text-slate-400' },
-                { id: 'in-progress', title: '進行中', icon: Play, data: orderColumn(filtered.filter(t=>t.status==='in-progress')), bg: 'bg-indigo-50/50 border-indigo-100', text: 'text-indigo-800', iconColor: 'text-indigo-500 fill-current' },
-                { id: 'done', title: '已完成', icon: CheckCircle, data: orderColumn(filtered.filter(t=>t.status==='done')), bg: 'bg-emerald-50/50 border-emerald-100 opacity-90', text: 'text-emerald-800', iconColor: 'text-emerald-500' }
-              ].map(col => (
-                <div key={col.id} className={`flex-1 w-full flex flex-col gap-4 p-4 rounded-3xl border ${col.bg}`} onDragOver={e=>e.preventDefault()} onDrop={(e)=>{ const taskId = e.dataTransfer.getData('taskId'); if(taskId) toggleStatus(taskId, col.id); }}>
+              {boardColumns.map((col, idx) => {
+                const style = col.id === 'todo' ? { icon: Square, bg: 'bg-slate-50/80 border-slate-200', text: 'text-slate-700', iconColor: 'text-slate-400' }
+                  : col.id === 'in-progress' ? { icon: Play, bg: 'bg-indigo-50/50 border-indigo-100', text: 'text-indigo-800', iconColor: 'text-indigo-500 fill-current' }
+                  : col.id === 'done' ? { icon: CheckCircle, bg: 'bg-emerald-50/50 border-emerald-100 opacity-90', text: 'text-emerald-800', iconColor: 'text-emerald-500' }
+                  : { icon: ListIcon, bg: 'bg-amber-50/40 border-amber-200', text: 'text-amber-800', iconColor: 'text-amber-500' };
+                const knownIds = boardColumns.map(c => c.id);
+                let data = filtered.filter(t => (t.status || 'todo') === col.id);
+                if (idx === 0) data = data.concat(filtered.filter(t => !knownIds.includes(t.status || 'todo'))); // status 對不到任何欄位的任務歸第一欄，不讓它消失
+                data = orderColumn(data);
+                const Icon = style.icon;
+                return (
+                <div key={col.id} className={`flex-1 w-full flex flex-col gap-4 p-4 rounded-3xl border ${style.bg}`} onDragOver={e=>e.preventDefault()} onDrop={(e)=>{ const taskId = e.dataTransfer.getData('taskId'); if(taskId) toggleStatus(taskId, col.id); }}>
                   <div className="flex items-center justify-between px-2">
-                    <h3 className={`text-lg font-black ${col.text} flex items-center gap-2`}><col.icon className={`w-5 h-5 ${col.iconColor}`} /> {col.title}</h3>
-                    <span className="bg-white text-slate-500 text-sm font-black px-3 py-1 rounded-full shadow-sm border border-slate-200">{col.data.length}</span>
+                    <h3 className={`text-lg font-black ${style.text} flex items-center gap-2`}><Icon className={`w-5 h-5 ${style.iconColor}`} /> {col.title}</h3>
+                    <span className="bg-white text-slate-500 text-sm font-black px-3 py-1 rounded-full shadow-sm border border-slate-200">{data.length}</span>
                   </div>
                   <div className="flex flex-col gap-0 min-h-[200px]">
-                     {col.data.map(task => (
+                     {data.map(task => (
                         <div key={task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)}>
                           <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} />
                         </div>
                      ))}
-                     {col.data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">{searching ? '查無符合' : '無任務或拖曳至此'}</div>}
+                     {data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">{searching ? '查無符合' : '無任務或拖曳至此'}</div>}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         );
@@ -2009,12 +2041,62 @@
                 setSettingsNewUser('');
              }
           };
+          // 看板欄位管理（Jira 式集中箱）
+          const renameCol = (id, title) => setBoardColumns(prev => prev.map(c => c.id === id ? { ...c, title } : c));
+          const addCol = () => setBoardColumns(prev => {
+             const cols = [...prev];
+             const di = cols.findIndex(c => c.id === 'done');
+             const item = { id: 'col_' + Date.now().toString(36), title: '新欄位', builtin: false };
+             if (di >= 0) cols.splice(di, 0, item); else cols.push(item);
+             return cols;
+          });
+          const moveCol = (idx, dir) => setBoardColumns(prev => {
+             const cols = [...prev]; const j = idx + dir;
+             if (j < 0 || j >= cols.length) return prev;
+             const tmp = cols[idx]; cols[idx] = cols[j]; cols[j] = tmp;
+             return cols;
+          });
+          const deleteCol = (col) => {
+             if (col.builtin) return;
+             const count = tasks.filter(t => (t.status || 'todo') === col.id).length;
+             if (count > 0) { window.alert('這個欄位裡還有 ' + count + ' 個任務，請先把任務拖到別的欄位，才能刪除這欄。'); return; }
+             setBoardColumns(prev => prev.filter(c => c.id !== col.id));
+          };
 
           return (
           <div className="w-full space-y-8 animate-in fade-in duration-300 pb-10">
              <div className="bg-white p-8 md:p-10 rounded-3xl border border-slate-200 shadow-sm w-full">
                 <h2 className="text-2xl font-black text-slate-800 mb-2 flex items-center gap-3"><Settings className="w-7 h-7 text-indigo-500" /> 系統設定</h2>
                 <p className="text-slate-500 font-bold mb-10 text-sm">修改專案名稱將會自動同步所有舊任務的標籤。輸入完畢可直接按 Enter 鍵快速儲存。</p>
+
+                <div className="mb-12">
+                   <h3 className="text-lg font-black text-slate-700 mb-4 flex items-center gap-2"><LayoutDashboard className="w-5 h-5" /> 看板欄位管理</h3>
+                   <div className="bg-slate-50 p-6 md:p-8 rounded-3xl border border-slate-200 flex flex-col gap-4">
+                      <p className="text-xs font-bold text-slate-400">看板欄位就像集中箱，可改名、調順序、新增自訂欄位。內建 3 欄（待辦/進行中/已完成）不可刪；「已完成」是完工判斷依據。自訂欄位若裡面還有任務，需先把任務移走才能刪。</p>
+                      <div className="flex flex-col gap-2 max-w-2xl">
+                         {boardColumns.map((col, idx) => {
+                            const count = tasks.filter(t => (t.status || 'todo') === col.id).length;
+                            return (
+                            <div key={col.id} className="flex items-center gap-2 bg-white border border-slate-200 pl-2 pr-2 py-2 rounded-xl shadow-sm">
+                               <div className="flex flex-col shrink-0">
+                                  <button onClick={() => moveCol(idx, -1)} disabled={idx === 0} title="上移" className={`w-5 h-4 flex items-center justify-center rounded ${idx === 0 ? 'text-slate-200' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}><ChevronDown className="w-3.5 h-3.5 rotate-180" /></button>
+                                  <button onClick={() => moveCol(idx, 1)} disabled={idx === boardColumns.length - 1} title="下移" className={`w-5 h-4 flex items-center justify-center rounded ${idx === boardColumns.length - 1 ? 'text-slate-200' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}><ChevronDown className="w-3.5 h-3.5" /></button>
+                               </div>
+                               <span className={`shrink-0 w-2.5 h-2.5 rounded-full ${col.id === 'todo' ? 'bg-slate-400' : col.id === 'in-progress' ? 'bg-indigo-500' : col.id === 'done' ? 'bg-emerald-500' : 'bg-amber-400'}`}></span>
+                               <input type="text" value={col.title} onChange={(e) => renameCol(col.id, e.target.value)} className="flex-1 bg-transparent border border-transparent hover:border-slate-200 focus:border-indigo-400 focus:bg-white text-slate-700 font-bold px-2 py-1.5 rounded-lg outline-none transition-colors" />
+                               <span className="shrink-0 text-[11px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{count} 筆</span>
+                               {col.builtin ? (
+                                  <span className="shrink-0 text-[10px] font-black text-slate-300 px-2" title="內建欄位不可刪除">內建</span>
+                               ) : (
+                                  <button onClick={() => deleteCol(col)} title={count > 0 ? '欄位內還有任務，不能刪' : '刪除此欄位'} className={`shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${count > 0 ? 'text-slate-200 cursor-not-allowed' : 'text-slate-400 hover:text-red-500 hover:bg-red-50'}`}><Trash2 className="w-4 h-4" /></button>
+                               )}
+                            </div>
+                            );
+                         })}
+                      </div>
+                      <div><button onClick={addCol} className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black px-5 py-2.5 rounded-xl transition-colors shadow-sm text-sm"><Plus className="w-4 h-4" /> 新增欄位</button></div>
+                   </div>
+                </div>
 
                 <div className="mb-12">
                    <h3 className="text-lg font-black text-slate-700 mb-4 flex items-center gap-2"><BookOpen className="w-5 h-5" /> 專案分類管理</h3>
