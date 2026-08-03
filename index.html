@@ -46,7 +46,7 @@
       LayoutDashboard, List as ListIcon, PenSquare, MessageSquare, BarChart2, 
       Settings, BookOpen, Plus, Search, Filter, Calendar, Clock, User, 
       Trash2, Edit2, Play, Square, CheckCircle, ChevronDown, PieChart as PieChartIcon, 
-      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle
+      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle, Mail, Send
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
@@ -1398,8 +1398,8 @@
                <div className="flex flex-col gap-3 bg-yellow-50/50 p-4 rounded-2xl border border-yellow-200/70">
                   <div className="flex items-center gap-2 mb-2 text-yellow-600 font-black"><PenSquare className="w-5 h-5" /> 隨手筆記 & 交辦區</div>
                   <textarea className="w-full bg-transparent text-slate-800 text-lg font-bold outline-none resize-none placeholder-slate-400 min-h-[100px]" placeholder="隨手記下事情... (可以選擇顏色與相關人員)" id="newNoteInput" />
-                  <div className="flex items-center justify-between border-t border-yellow-200/60 pt-3">
-                     <div className="flex items-center gap-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-yellow-200/60 pt-3">
+                     <div className="flex flex-wrap items-center gap-3">
                         <div className="flex items-center gap-2">
                            <span className="text-xs font-bold text-slate-500">緊急程度:</span>
                            <div className="flex gap-1.5" id="noteColorPicker">
@@ -1412,7 +1412,7 @@
                               ))}
                            </div>
                         </div>
-                        <div className="w-px h-4 bg-slate-300"></div>
+                        <div className="w-px h-4 bg-slate-300 hidden sm:block"></div>
                         <div className="flex items-center gap-2">
                            <span className="text-xs font-bold text-slate-500">@ 相關人員:</span>
                            <select id="noteUserSelect" className="bg-white border border-slate-200 text-xs font-bold px-2 py-1 rounded-lg outline-none cursor-pointer">
@@ -1446,7 +1446,7 @@
                            setDraggedNoteIndex(null);
                        }}
                        className={`p-6 rounded-3xl shadow-sm hover:shadow-md transition-all relative group flex flex-col gap-4 cursor-grab active:cursor-grabbing border border-black/5 ${note.color || 'bg-yellow-100/70'}`}>
-                     <textarea className="w-full flex-1 bg-transparent resize-none outline-none font-bold text-slate-800 overflow-hidden leading-relaxed" style={{ minHeight: '120px' }} value={note.text} onInput={(e) => { e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; }} onChange={e => setNotes(notes.map(n => n.id === note.id ? {...n, text: e.target.value} : n))} />
+                     <textarea className="w-full flex-1 bg-transparent resize-none outline-none font-bold text-slate-800 overflow-y-auto leading-relaxed custom-scrollbar" style={{ minHeight: '120px', maxHeight: '260px' }} value={note.text} onChange={e => setNotes(notes.map(n => n.id === note.id ? {...n, text: e.target.value} : n))} />
                      <div className="flex items-center justify-between mt-auto pt-4 border-t border-black/5">
                         <select className="text-xs font-black bg-white/60 px-2 py-1.5 rounded-lg text-slate-700 outline-none cursor-pointer hover:bg-white/80 transition-colors border-none shadow-sm" value={note.tag || ''} onChange={(e) => setNotes(notes.map(n => n.id === note.id ? {...n, tag: e.target.value} : n))}>
                            <option value="">- 無相關人員 -</option>{users.map(u => <option key={u} value={u}>@ {u}</option>)}
@@ -1458,7 +1458,11 @@
                            </div>
                         </div>
                      </div>
-                     <button onClick={()=>setNotes(notes.filter(n=>n.id!==note.id))} className="absolute top-4 right-4 w-8 h-8 bg-white/50 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all text-slate-500 shadow-sm"><Trash2 className="w-4 h-4" /></button>
+                     <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                        <button onClick={() => { window.location.href = 'mailto:?subject=' + encodeURIComponent('隨手筆記') + '&body=' + encodeURIComponent(note.text || ''); }} title="用 Outlook 寄出這則筆記" className="w-8 h-8 bg-white/60 hover:bg-indigo-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Mail className="w-4 h-4" /></button>
+                        <button onClick={() => { if (!(note.text || '').trim()) return; if (window.confirm('把這則筆記送到匯報清單（會建立一則任務' + (note.tag ? '，匯報給 ' + note.tag : '') + '）？')) { setTasks([healTaskData({ id: Date.now().toString(), text: note.text, assignee: note.tag || '', status: 'todo', category: '', period: '不指定時段', createdAt: new Date().toISOString() }), ...tasks]); } }} title="送到匯報清單（建立任務）" className="w-8 h-8 bg-white/60 hover:bg-emerald-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Send className="w-4 h-4" /></button>
+                        <button onClick={() => setNotes(notes.filter(n => n.id !== note.id))} title="刪除" className="w-8 h-8 bg-white/60 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Trash2 className="w-4 h-4" /></button>
+                     </div>
                   </div>
                ))}
             </div>
