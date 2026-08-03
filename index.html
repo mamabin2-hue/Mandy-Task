@@ -940,18 +940,34 @@
       const catMeta = (catId) => { const p = projByName[String(catId)]; const name = (p && p.name) || (catId ? String(catId) : '未分類'); const color = (p && p.color) || '#94a3b8'; return { name, color }; };
       const doneTasks = useMemo(() => safeArr(tasks).filter((t) => t && t.status === 'done'), [tasks]);
       const [keyword, setKeyword] = useState('');
+      const [catFilter, setCatFilter] = useState('__all__');
       const kw = keyword.trim().toLowerCase();
-      const filtered = useMemo(() => { if (!kw) return doneTasks; return doneTasks.filter((t) => { const text = String((t && t.text) || '').toLowerCase(); const cat = catMeta(t && t.category).name.toLowerCase(); const assignee = String((t && t.assignee) || '').toLowerCase(); return text.includes(kw) || cat.includes(kw) || assignee.includes(kw); }); }, [doneTasks, kw, projByName]);
-      const groups = useMemo(() => {
-        const map = {};
-        filtered.forEach((t) => { const key = t && t.category != null ? String(t.category) : '__none__'; if (!map[key]) { const meta = catMeta(t && t.category); map[key] = { key, name: meta.name, color: meta.color, items: [], minutes: 0 }; } map[key].items.push(t); map[key].minutes += getMinutes(t); });
-        const arr = Object.values(map);
-        arr.forEach((g) => { g.items.sort((a, b) => { const ta = getDoneTime(a); const tb = getDoneTime(b); if (ta == null && tb == null) return 0; if (ta == null) return 1; if (tb == null) return -1; return tb - ta; }); });
-        arr.sort((a, b) => b.items.length - a.items.length);
-        return arr;
-      }, [filtered, projByName]);
-      const [collapsed, setCollapsed] = useState(() => new Set());
-      const toggle = (key) => { setCollapsed((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; }); };
+      const catOptions = useMemo(() => { const m = new Map(); doneTasks.forEach((t) => { const key = t && t.category != null ? String(t.category) : '__none__'; if (!m.has(key)) m.set(key, catMeta(t && t.category).name); }); return [['__all__', '全部分類'], ...Array.from(m.entries())]; }, [doneTasks, projByName]);
+      const filtered = useMemo(() => doneTasks.filter((t) => {
+        if (catFilter !== '__all__') { const key = t && t.category != null ? String(t.category) : '__none__'; if (key !== catFilter) return false; }
+        if (!kw) return true;
+        const text = String((t && t.text) || '').toLowerCase(); const cat = catMeta(t && t.category).name.toLowerCase(); const assignee = String((t && t.assignee) || '').toLowerCase();
+        return text.includes(kw) || cat.includes(kw) || assignee.includes(kw);
+      }), [doneTasks, kw, catFilter, projByName]);
+      // 依 年→月→日 建樹（各層皆預設收合）
+      const dateTree = useMemo(() => {
+        const years = {};
+        filtered.forEach((t) => {
+          const ms = getDoneTime(t); const d = ms == null ? null : new Date(ms);
+          const y = d ? d.getFullYear() : 0; const mo = d ? d.getMonth() + 1 : 0; const day = d ? d.getDate() : 0;
+          years[y] = years[y] || { y, count: 0, months: {} }; years[y].count++;
+          const M = years[y].months; M[mo] = M[mo] || { mo, count: 0, days: {} }; M[mo].count++;
+          const D = M[mo].days; D[day] = D[day] || { day, items: [] }; D[day].items.push(t);
+        });
+        const yArr = Object.values(years).sort((a, b) => b.y - a.y);
+        yArr.forEach((yy) => { yy.monthArr = Object.values(yy.months).sort((a, b) => b.mo - a.mo); yy.monthArr.forEach((mm) => { mm.dayArr = Object.values(mm.days).sort((a, b) => b.day - a.day); mm.dayArr.forEach((dd) => dd.items.sort((a, b) => (getDoneTime(b) || 0) - (getDoneTime(a) || 0))); }); });
+        return yArr;
+      }, [filtered]);
+      const [expanded, setExpanded] = useState(() => new Set());
+      const [openTask, setOpenTask] = useState(() => new Set());
+      const mkTog = (setter) => (k) => setter((prev) => { const n = new Set(prev); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+      const togNode = mkTog(setExpanded);
+      const togTask = mkTog(setOpenTask);
       const totalCount = doneTasks.length;
       const totalMinutes = useMemo(() => doneTasks.reduce((s, t) => s + getMinutes(t), 0), [doneTasks]);
       const totalHours = (totalMinutes / 60).toFixed(1);
@@ -969,47 +985,91 @@
             <SummaryCard icon={<Clock className="w-5 h-5 text-sky-600" />} value={totalHours + ' h'} label="總投入時數" tint="bg-sky-50" />
             <SummaryCard icon={<Calendar className="w-5 h-5 text-slate-600" />} value={catCount} label="涵蓋分類" tint="bg-slate-100" />
           </div>
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-3">
-            <div className="relative">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-3 flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
               <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="搜尋任務、分類或負責人…" className="w-full pl-9 pr-9 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300" />
               {keyword && (<button onClick={() => setKeyword('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" aria-label="清除"><X className="w-4 h-4" /></button>)}
             </div>
+            <select value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="sm:w-56 py-2 px-3 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200 cursor-pointer">
+              {catOptions.map(([v, label]) => <option key={v} value={v}>{v === '__all__' ? label : ('分類：' + label)}</option>)}
+            </select>
           </div>
-          {groups.length === 0 ? (
+          {filtered.length === 0 ? (
             <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-10 flex flex-col items-center justify-center text-center">
               <div className="w-14 h-14 rounded-full bg-indigo-50 flex items-center justify-center mb-3"><CheckCircle className="w-7 h-7 text-indigo-400" /></div>
-              <div className="text-slate-700 font-semibold mb-1">{kw ? '找不到符合的已完成任務' : '尚無已完成任務'}</div>
-              <div className="text-sm text-slate-500">{kw ? '換個關鍵字再試試看。' : '完成任務後就會彙整在這裡囉！'}</div>
+              <div className="text-slate-700 font-semibold mb-1">{(kw || catFilter !== '__all__') ? '找不到符合的已完成任務' : '尚無已完成任務'}</div>
+              <div className="text-sm text-slate-500">{(kw || catFilter !== '__all__') ? '換個關鍵字或分類再試試看。' : '完成任務後就會彙整在這裡囉！'}</div>
             </div>
           ) : (
-            <div className="space-y-4">
-              {groups.map((g) => {
-                const isOpen = !collapsed.has(g.key);
+            <div className="space-y-3">
+              {dateTree.map((yy) => {
+                const yKey = 'y' + yy.y; const yOpen = expanded.has(yKey);
                 return (
-                  <div key={g.key} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
-                    <button onClick={() => toggle(g.key)} className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left">
-                      <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: g.color }} />
-                      <span className="font-semibold text-slate-800 truncate">{g.name}</span>
-                      <span className="text-xs font-medium text-indigo-600 bg-indigo-50 rounded-full px-2 py-0.5 shrink-0">{g.items.length} 件</span>
-                      <span className="text-xs text-slate-400 shrink-0 hidden sm:inline">{Math.round(g.minutes)} 分鐘</span>
-                      <ChevronDown className={'w-5 h-5 text-slate-400 ml-auto shrink-0 transition-transform ' + (isOpen ? 'rotate-180' : '')} />
-                    </button>
-                    {isOpen && (
-                      <div className="border-t border-slate-100 divide-y divide-slate-100 max-h-[420px] overflow-y-auto">
-                        {g.items.map((t, idx) => (
-                          <div key={(t && t.id != null ? t.id : 'idx') + '-' + idx} className="px-5 py-3">
-                            <div className="text-sm font-medium text-slate-800 break-words">{String((t && t.text) || '（無標題）')}</div>
-                            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
-                              <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-400" />{getDoneTimeLabel(t)}</span>
-                              <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-400" />{Math.round(getMinutes(t))} 分鐘</span>
-                              {t && t.assignee ? (<span className="inline-flex items-center gap-1 text-slate-600">{String(t.assignee)}</span>) : null}
+                <div key={yKey} className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden">
+                  <button onClick={() => togNode(yKey)} className="w-full flex items-center gap-3 px-5 py-4 hover:bg-slate-50 transition-colors text-left">
+                    <Calendar className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span className="font-black text-slate-800">{yy.y ? (yy.y + ' 年') : '未知日期'}</span>
+                    <span className="text-xs font-medium text-indigo-600 bg-indigo-50 rounded-full px-2 py-0.5 shrink-0">{yy.count} 件</span>
+                    <ChevronDown className={'w-5 h-5 text-slate-400 ml-auto shrink-0 transition-transform ' + (yOpen ? 'rotate-180' : '')} />
+                  </button>
+                  {yOpen && (
+                    <div className="border-t border-slate-100 px-3 py-2 space-y-1.5">
+                      {yy.monthArr.map((mm) => {
+                        const mKey = yKey + '-m' + mm.mo; const mOpen = expanded.has(mKey);
+                        return (
+                        <div key={mKey} className="rounded-2xl bg-slate-50/70 border border-slate-100">
+                          <button onClick={() => togNode(mKey)} className="w-full flex items-center gap-2 px-4 py-2.5 text-left">
+                            <span className="font-bold text-slate-700 text-sm">{mm.mo ? (mm.mo + ' 月') : '未知月份'}</span>
+                            <span className="text-[11px] text-slate-500 bg-white rounded-full px-2 py-0.5 border border-slate-200 shrink-0">{mm.count} 件</span>
+                            <ChevronDown className={'w-4 h-4 text-slate-400 ml-auto shrink-0 transition-transform ' + (mOpen ? 'rotate-180' : '')} />
+                          </button>
+                          {mOpen && (
+                            <div className="px-2 pb-2 space-y-1">
+                              {mm.dayArr.map((dd) => {
+                                const dKey = mKey + '-d' + dd.day; const dOpen = expanded.has(dKey);
+                                return (
+                                <div key={dKey} className="rounded-xl bg-white border border-slate-100">
+                                  <button onClick={() => togNode(dKey)} className="w-full flex items-center gap-2 px-3 py-2 text-left">
+                                    <span className="font-bold text-slate-600 text-xs">{dd.day ? (dd.day + ' 日') : '—'}</span>
+                                    <span className="text-[11px] text-slate-400 shrink-0">{dd.items.length} 件</span>
+                                    <ChevronDown className={'w-3.5 h-3.5 text-slate-400 ml-auto shrink-0 transition-transform ' + (dOpen ? 'rotate-180' : '')} />
+                                  </button>
+                                  {dOpen && (
+                                    <div className="border-t border-slate-100 divide-y divide-slate-100">
+                                      {dd.items.map((t, idx) => {
+                                        const tKey = dKey + '-' + (t && t.id != null ? t.id : idx); const tOpen = openTask.has(tKey); const meta = catMeta(t && t.category);
+                                        return (
+                                        <div key={tKey} className="px-3 py-2">
+                                          <button onClick={() => togTask(tKey)} className="w-full flex items-center gap-2 text-left">
+                                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: meta.color }} />
+                                            <span className="text-sm font-medium text-slate-800 break-words flex-1">{String((t && t.text) || '（無標題）')}</span>
+                                            <ChevronDown className={'w-3.5 h-3.5 text-slate-300 shrink-0 transition-transform ' + (tOpen ? 'rotate-180' : '')} />
+                                          </button>
+                                          {tOpen && (
+                                            <div className="mt-1.5 ml-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+                                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded" style={{ backgroundColor: meta.color + '22', color: meta.color }}>{meta.name}</span>
+                                              <span className="inline-flex items-center gap-1"><Calendar className="w-3.5 h-3.5 text-slate-400" />{getDoneTimeLabel(t)}</span>
+                                              <span className="inline-flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-slate-400" />{Math.round(getMinutes(t))} 分鐘</span>
+                                              {t && t.assignee ? (<span className="inline-flex items-center gap-1 text-slate-600">{String(t.assignee)}</span>) : null}
+                                            </div>
+                                          )}
+                                        </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                                );
+                              })}
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                          )}
+                        </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
                 );
               })}
             </div>
