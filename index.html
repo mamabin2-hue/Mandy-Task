@@ -202,8 +202,8 @@
                  <ChevronDown className="w-3 h-3 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                </div>
              </div>
-             <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} onDragStart={stopDragAndDrop} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0">
-                <Trash2 className="w-4 h-4" />
+             <button onClick={(e) => { e.stopPropagation(); deleteTask(task.id); }} onDragStart={stopDragAndDrop} className="w-7 h-7 rounded-full flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors shrink-0">
+                <Trash2 className="w-3.5 h-3.5" />
              </button>
           </div>
 
@@ -1553,9 +1553,9 @@
                         </div>
                      </div>
                      <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
-                        <button onClick={() => { window.location.href = 'mailto:?subject=' + encodeURIComponent('隨手筆記') + '&body=' + encodeURIComponent(note.text || ''); }} title="用 Outlook 寄出這則筆記" className="w-8 h-8 bg-white/60 hover:bg-indigo-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Mail className="w-4 h-4" /></button>
-                        <button onClick={() => { if (!(note.text || '').trim()) return; if (window.confirm('把這則筆記送到匯報清單（會建立一則任務' + (note.tag ? '，匯報給 ' + note.tag : '') + '）？')) { setTasks([healTaskData({ id: Date.now().toString(), text: note.text, assignee: note.tag || '', status: 'todo', category: '', period: '不指定時段', createdAt: new Date().toISOString() }), ...tasks]); } }} title="送到匯報清單（建立任務）" className="w-8 h-8 bg-white/60 hover:bg-emerald-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Send className="w-4 h-4" /></button>
-                        <button onClick={() => { setNotes(notes.filter(n => n.id !== note.id)); setDeletedNotes([{ ...note, deletedAt: new Date().toISOString() }, ...deletedNotes]); }} title="刪除（可到回收桶復原）" className="w-8 h-8 bg-white/60 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Trash2 className="w-4 h-4" /></button>
+                        <button onClick={() => { window.location.href = 'mailto:?subject=' + encodeURIComponent('隨手筆記') + '&body=' + encodeURIComponent(note.text || ''); }} title="用 Outlook 寄出這則筆記" className="w-7 h-7 bg-white/60 hover:bg-indigo-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Mail className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => { if (!(note.text || '').trim()) return; if (window.confirm('把這則筆記送到匯報清單（會建立一則任務' + (note.tag ? '，匯報給 ' + note.tag : '') + '）？')) { setTasks([healTaskData({ id: Date.now().toString(), text: note.text, assignee: note.tag || '', status: 'todo', category: '', period: '不指定時段', createdAt: new Date().toISOString() }), ...tasks]); } }} title="送到匯報清單（建立任務）" className="w-7 h-7 bg-white/60 hover:bg-emerald-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Send className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => { setNotes(notes.filter(n => n.id !== note.id)); setDeletedNotes([{ ...note, deletedAt: new Date().toISOString() }, ...deletedNotes]); }} title="刪除（可到回收桶復原）" className="w-7 h-7 bg-white/60 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Trash2 className="w-3.5 h-3.5" /></button>
                      </div>
                   </div>
                ))}
