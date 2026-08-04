@@ -682,7 +682,7 @@
                 {(() => {
                   const groups = {};
                   unplanned.forEach((t) => { const c = (t.category || '').trim() || '未分類'; (groups[c] = groups[c] || []).push(t); });
-                  const cats = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'zh-Hant-u-co-stroke'));
+                  const cats = Object.keys(groups).sort((a, b) => { if (a === '未分類') return 1; if (b === '未分類') return -1; return a.localeCompare(b, 'zh-Hant-u-co-stroke'); });
                   return cats.map((cat) => (
                     <div key={cat} className="shrink-0 w-[180px] bg-white/70 rounded-xl border border-amber-100 p-2 flex flex-col">
                       <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-600 px-1 pb-1.5 mb-1 border-b border-amber-100">
