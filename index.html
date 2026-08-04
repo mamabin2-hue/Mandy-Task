@@ -677,14 +677,29 @@
           </div>
           {onPlan && unplanned.length > 0 && (
             <div className="mb-3 bg-amber-50/60 border border-amber-200 rounded-2xl p-3">
-              <div className="flex items-center gap-2 mb-2 text-xs font-black text-amber-700"><Calendar size={14} /> 待排程任務（{unplanned.length}）<span className="font-normal text-amber-500">— 把它們拖到上面某一天，就排進當天計劃（不影響截止日）</span></div>
-              <div className="flex gap-2 overflow-x-auto pb-1">
-                {unplanned.map((t) => (
-                  <div key={t.id} draggable onDragStart={(e) => e.dataTransfer.setData('planTaskId', t.id)} title="拖到某一天排程" className="shrink-0 max-w-[220px] flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-white border border-amber-200 shadow-sm cursor-grab active:cursor-grabbing hover:border-amber-300">
-                    <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorOf(t.category) }} />
-                    <span className="text-xs font-medium text-slate-700 truncate">{t.text || '(未命名任務)'}</span>
-                  </div>
-                ))}
+              <div className="flex items-center gap-2 mb-2 text-xs font-black text-amber-700"><Calendar size={14} /> 待排程任務（{unplanned.length}）<span className="font-normal text-amber-500">— 依類別分欄，把任務拖到上面某一天就排進當天計劃（不影響截止日）</span></div>
+              <div className="flex gap-2 overflow-x-auto pb-1 items-start">
+                {(() => {
+                  const groups = {};
+                  unplanned.forEach((t) => { const c = (t.category || '').trim() || '未分類'; (groups[c] = groups[c] || []).push(t); });
+                  const cats = Object.keys(groups).sort((a, b) => a.localeCompare(b, 'zh-Hant-u-co-stroke'));
+                  return cats.map((cat) => (
+                    <div key={cat} className="shrink-0 w-[180px] bg-white/70 rounded-xl border border-amber-100 p-2 flex flex-col">
+                      <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-600 px-1 pb-1.5 mb-1 border-b border-amber-100">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorOf(cat === '未分類' ? '' : cat) }} />
+                        <span className="truncate flex-1">{cat}</span>
+                        <span className="text-slate-400 shrink-0">{groups[cat].length}</span>
+                      </div>
+                      <div className="flex flex-col gap-1.5 overflow-y-auto max-h-[260px] pr-0.5">
+                        {groups[cat].map((t) => (
+                          <div key={t.id} draggable onDragStart={(e) => e.dataTransfer.setData('planTaskId', t.id)} title="拖到某一天排程" className="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-white border border-amber-200 shadow-sm cursor-grab active:cursor-grabbing hover:border-amber-300">
+                            <span className="text-xs font-medium text-slate-700 break-words leading-tight">{t.text || '(未命名任務)'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ));
+                })()}
               </div>
             </div>
           )}
