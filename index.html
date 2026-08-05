@@ -239,6 +239,20 @@
       const titleRef = useRef(null);
       const noteRef = useRef(null);
 
+      // 任務貼圖：存在 task.images，走 updateTask 同步。含放大燈箱
+      const taskImgs = Array.isArray(task.images) ? task.images : [];
+      const [imgLightbox, setImgLightbox] = useState(null);
+      const addTaskImage = async (blob) => {
+        try {
+          const dataUrl = await compressImage(blob);
+          const next = [...taskImgs, dataUrl];
+          if (JSON.stringify(next).length > 700 * 1024) { window.alert('這張任務的圖片太多了，先不加以免影響同步。'); return; }
+          updateTask(task.id, 'images', next);
+        } catch (e) { window.alert('圖片處理失敗，換一張試試。'); }
+      };
+      const removeTaskImage = (idx) => updateTask(task.id, 'images', taskImgs.filter((_, i) => i !== idx));
+      const onPasteImg = (e) => { const items = (e.clipboardData && e.clipboardData.items) ? e.clipboardData.items : []; for (let i = 0; i < items.length; i++) { if (items[i].type && items[i].type.indexOf('image') === 0) { const blob = items[i].getAsFile(); if (blob) { e.preventDefault(); addTaskImage(blob); } } } };
+
       const stopDrag = (e) => { e.stopPropagation(); };
       const stopDragAndDrop = (e) => { e.stopPropagation(); e.preventDefault(); };
 
@@ -296,7 +310,17 @@
                    <ChevronDown className="w-3 h-3 text-purple-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
                  </div>
                </div>
-               <textarea ref={noteRef} className="w-full text-sm font-bold text-slate-600 bg-yellow-50/80 p-3 outline-none resize-none placeholder-slate-400 focus:bg-yellow-100/50 transition-colors overflow-hidden leading-relaxed" style={{ minHeight: '60px' }} value={task.note || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target)} onChange={(e) => updateTask(task.id, 'note', e.target.value)} placeholder="點此直接輸入備註、交辦事項..." />
+               <textarea ref={noteRef} className="w-full text-sm font-bold text-slate-600 bg-yellow-50/80 p-3 outline-none resize-none placeholder-slate-400 focus:bg-yellow-100/50 transition-colors overflow-hidden leading-relaxed" style={{ minHeight: '60px' }} value={task.note || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target)} onChange={(e) => updateTask(task.id, 'note', e.target.value)} onPaste={onPasteImg} placeholder="點此直接輸入備註、交辦事項...（可直接貼圖 Ctrl+V）" />
+               {taskImgs.length > 0 && (
+                 <div className="flex flex-wrap gap-2 p-2 bg-white/40">
+                   {taskImgs.map((src, i) => (
+                     <div key={i} className="relative group/timg">
+                       <img src={src} alt="貼圖" onClick={(e) => { e.stopPropagation(); setImgLightbox(src); }} className="w-16 h-16 object-cover rounded-lg border border-black/10 cursor-zoom-in shadow-sm" />
+                       <button onClick={(e) => { e.stopPropagation(); removeTaskImage(i); }} title="移除這張圖" className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-white rounded-full shadow flex items-center justify-center text-slate-400 hover:text-red-500 opacity-0 group-hover/timg:opacity-100 transition-opacity"><X className="w-3 h-3" /></button>
+                     </div>
+                   ))}
+                 </div>
+               )}
             </div>
 
             {/* 子任務 / checklist */}
@@ -388,6 +412,12 @@
                </div>
              )}
           </div>
+          {imgLightbox && (
+            <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out animate-in fade-in duration-150" onClick={(e) => { e.stopPropagation(); setImgLightbox(null); }}>
+              <img src={imgLightbox} alt="放大檢視" className="max-w-full max-h-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
+              <button onClick={(e) => { e.stopPropagation(); setImgLightbox(null); }} className="absolute top-5 right-5 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-slate-700 hover:bg-white shadow-lg" title="關閉"><X className="w-5 h-5" /></button>
+            </div>
+          )}
         </div>
       );
     });
@@ -647,7 +677,10 @@
       safeTasks.forEach((t) => { if (!t) return; const d = parseDeadline(t.planDate) || parseDeadline(t.deadline); const k = dayKey(d); if (!k) return; (byDay[k] = byDay[k] || []).push(t); });
       const tasksOnDay = (d) => byDay[dayKey(d)] || [];
       // 待排程池：未完成、且既無計劃日也無截止日的任務（可拖到某天排入）
-      const unplanned = safeTasks.filter((t) => t && t.status !== 'done' && !t.planDate && !t.deadline);
+      const [poolSearch, setPoolSearch] = React.useState('');
+      const _pq = poolSearch.trim().toLowerCase();
+      const unplannedAll = safeTasks.filter((t) => t && t.status !== 'done' && !t.planDate && !t.deadline);
+      const unplanned = !_pq ? unplannedAll : unplannedAll.filter((t) => [t.text, t.category, t.assignee].filter(Boolean).join(' ').toLowerCase().includes(_pq));
       const handleDropOnDay = (e, d) => { e.preventDefault(); const id = e.dataTransfer.getData('planTaskId'); if (id && onPlan) onPlan(id, isoOf(d)); };
       const weekTotal = weekDays.reduce((n, d) => n + tasksOnDay(d).length, 0);
       const PTaskCard = ({ t }) => (
@@ -675,9 +708,17 @@
             </div>
             <span className="text-xs bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-xl font-medium">本週合計 {weekTotal} 件</span>
           </div>
-          {onPlan && unplanned.length > 0 && (
+          {onPlan && unplannedAll.length > 0 && (
             <div className="mb-3 bg-amber-50/60 border border-amber-200 rounded-2xl p-3">
-              <div className="flex items-center gap-2 mb-2 text-xs font-black text-amber-700"><Calendar size={14} /> 待排程任務（{unplanned.length}）<span className="font-normal text-amber-500">— 依類別分欄，把任務拖到上面某一天就排進當天計劃（不影響截止日）</span></div>
+              <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+                <div className="flex items-center gap-2 text-xs font-black text-amber-700"><Calendar size={14} /> 待排程任務（{unplanned.length}{_pq ? '/' + unplannedAll.length : ''}）<span className="font-normal text-amber-500 hidden sm:inline">— 依類別分欄，拖到上面某天就排進計劃</span></div>
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-amber-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input type="text" value={poolSearch} onChange={(e) => setPoolSearch(e.target.value)} placeholder="搜尋待排程任務…" className="w-44 sm:w-56 pl-8 pr-7 py-1.5 rounded-lg bg-white border border-amber-200 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-200" />
+                  {poolSearch && <button onClick={() => setPoolSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-400 hover:text-amber-600"><X className="w-3.5 h-3.5" /></button>}
+                </div>
+              </div>
+              {unplanned.length === 0 && <div className="text-xs font-bold text-amber-600 py-3 text-center">找不到符合「{poolSearch}」的待排程任務</div>}
               <div className="flex gap-2 overflow-x-auto pb-1 items-start">
                 {(() => {
                   const groups = {};
