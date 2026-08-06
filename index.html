@@ -475,10 +475,12 @@
               <path d={s.path} fill={s.d.color}>
                 <title>{`${s.d.name}：${s.d.value} 分鐘 (${s.pct}%)`}</title>
               </path>
+              {s.pct >= 6 && (
               <text x={s.lx} y={s.ly} fill={s.d.color} textAnchor={s.lx > cx ? 'start' : 'end'} dominantBaseline="central" fontSize="14" fontWeight="900">
                 <tspan x={s.lx} dy="-0.6em">{clip(s.d.name)}</tspan>
                 <tspan x={s.lx} dy="1.6em" fontSize="22">{s.pct}%</tspan>
               </text>
+              )}
             </g>
           ))}
         </svg>
@@ -2246,6 +2248,17 @@
                            <SvgDonut data={categoryStats} onSliceClick={(d) => setStatsSelectedCat(prev => prev === d.name ? null : d.name)} />
                         ) : <div className="w-full h-full flex items-center justify-center text-slate-500/50 font-bold border-2 border-dashed border-slate-400/20 rounded-2xl">所選區間無時間紀錄</div>}
                      </div>
+                     {categoryStats.length > 0 && totalTime > 0 && (
+                       <div className="w-full mt-2 pt-3 border-t border-slate-100 flex flex-wrap gap-x-4 gap-y-2 justify-center">
+                         {categoryStats.map((c) => (
+                           <button key={c.name} onClick={() => setStatsSelectedCat(prev => prev === c.name ? null : c.name)} title={c.name} className={`flex items-center gap-1.5 text-xs font-bold transition-colors ${statsSelectedCat === c.name ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'}`}>
+                             <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
+                             <span className="truncate max-w-[150px]">{c.name}</span>
+                             <span className="text-slate-400">{Math.round(c.value / totalTime * 100)}%</span>
+                           </button>
+                         ))}
+                       </div>
+                     )}
                   </div>
                   {statsSelectedCat && (() => {
                     const catTasks = rangeFilteredTasks.filter(t => t.category === statsSelectedCat && t.timeInRange > 0).sort((a, b) => b.timeInRange - a.timeInRange);
