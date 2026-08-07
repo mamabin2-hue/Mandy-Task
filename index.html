@@ -256,15 +256,16 @@
       const stopDrag = (e) => { e.stopPropagation(); };
       const stopDragAndDrop = (e) => { e.stopPropagation(); e.preventDefault(); };
 
-      const adjustHeight = (el) => {
+      const adjustHeight = (el, max) => {
         if (el) {
           el.style.height = 'auto';
-          el.style.height = el.scrollHeight + 'px';
+          const h = max ? Math.min(el.scrollHeight, max) : el.scrollHeight;
+          el.style.height = h + 'px';
         }
       };
 
-      useEffect(() => { adjustHeight(titleRef.current); }, [task.text]);
-      useEffect(() => { adjustHeight(noteRef.current); }, [task.note]);
+      useEffect(() => { adjustHeight(titleRef.current, 160); }, [task.text]);
+      useEffect(() => { adjustHeight(noteRef.current, 220); }, [task.note]);
 
       return (
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col group transition-all hover:shadow-md w-full relative mb-4 overflow-visible" style={{ borderTopWidth: '6px', borderTopColor: projectColor }}>
@@ -299,7 +300,7 @@
           </div>
 
           <div className="p-4 flex flex-col gap-3">
-            <textarea ref={titleRef} className="w-full text-base font-black text-slate-800 bg-transparent border-none outline-none resize-none placeholder-slate-300 overflow-hidden" style={{ minHeight: '32px' }} value={task.text || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target)} onChange={(e) => updateTask(task.id, 'text', e.target.value)} placeholder="輸入任務名稱..." />
+            <textarea ref={titleRef} className="w-full text-base font-black text-slate-800 bg-transparent border-none outline-none resize-none placeholder-slate-300 overflow-y-auto custom-scrollbar" style={{ minHeight: '32px', maxHeight: '160px' }} value={task.text || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target, 160)} onChange={(e) => updateTask(task.id, 'text', e.target.value)} placeholder="輸入任務名稱..." />
 
             {!compact && (<>
             <div className="flex flex-col gap-0 border border-purple-100 rounded-xl overflow-hidden bg-purple-50/20">
@@ -313,7 +314,7 @@
                    <ChevronDown className="w-3 h-3 text-purple-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
                  </div>
                </div>
-               <textarea ref={noteRef} className="w-full text-sm font-bold text-slate-600 bg-yellow-50/80 p-3 outline-none resize-none placeholder-slate-400 focus:bg-yellow-100/50 transition-colors overflow-hidden leading-relaxed" style={{ minHeight: '60px' }} value={task.note || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target)} onChange={(e) => updateTask(task.id, 'note', e.target.value)} onPaste={onPasteImg} placeholder="點此直接輸入備註、交辦事項...（可直接貼圖 Ctrl+V）" />
+               <textarea ref={noteRef} className="w-full text-sm font-bold text-slate-600 bg-yellow-50/80 p-3 outline-none resize-none placeholder-slate-400 focus:bg-yellow-100/50 transition-colors overflow-y-auto custom-scrollbar leading-relaxed" style={{ minHeight: '60px', maxHeight: '220px' }} value={task.note || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onInput={(e) => adjustHeight(e.target, 220)} onChange={(e) => updateTask(task.id, 'note', e.target.value)} onPaste={onPasteImg} placeholder="點此直接輸入備註、交辦事項...（可直接貼圖 Ctrl+V）" />
                {taskImgs.length > 0 && (
                  <div className="flex flex-wrap gap-2 p-2 bg-white/40">
                    {taskImgs.map((src, i) => (
