@@ -1395,6 +1395,7 @@
       const flushSaveRef = useRef(() => {}); // 指向最新的「立即存檔」函式，供關頁前 flush 呼叫
       const oversizeAlertedRef = useRef(false); // 已對「逼近 1MB 上限」提示過，避免每次都跳
       const localJsonRef = useRef(null);     // 目前本地內容快照（給 onSnapshot 判斷「本地是否有未同步變更」，避免 stale closure）
+      const shrinkApprovedRef = useRef(false); // 使用者已確認「這次任務/便利貼大幅減少是刻意的」，避免同一編輯段落重複跳確認
       const [syncStatus, setSyncStatus] = useState('idle'); // idle | saving | saved | error
 
       // 產生目前本地完整內容（供比對與寫入共用）
@@ -1462,6 +1463,32 @@
         }
         oversizeAlertedRef.current = false;
         const prevSynced = syncedJsonRef.current;
+        // 資料保護：若這次要寫入的「任務」或「便利貼」數量比雲端基準驟減一半以上（且原本≥10筆），
+        // 極可能是誤還原了舊/小備份、或本地被意外清空 → 先確認，避免把雲端好資料整份蓋掉。
+        try {
+          const prev = prevSynced ? JSON.parse(prevSynced) : null;
+          if (prev && !shrinkApprovedRef.current) {
+            const pT = Array.isArray(prev.tasks) ? prev.tasks.length : 0;
+            const nT = Array.isArray(payload.tasks) ? payload.tasks.length : 0;
+            const pN = Array.isArray(prev.notes) ? prev.notes.length : 0;
+            const nN = Array.isArray(payload.notes) ? payload.notes.length : 0;
+            const bigDrop = (pT >= 10 && nT < pT * 0.5) || (pN >= 10 && nN < pN * 0.5);
+            if (bigDrop) {
+              const ok = window.confirm(
+                '偵測到資料大幅減少：\n' +
+                '　任務 ' + pT + ' → ' + nT + '　便利貼 ' + pN + ' → ' + nN + '\n\n' +
+                '若這是你「刻意刪除」的，按「確定」繼續同步。\n' +
+                '若不是（例如剛還原了舊備份、或畫面異常）→ 按「取消」，然後把網頁「重新整理」即可救回雲端資料，不會遺失。'
+              );
+              if (!ok) {
+                syncedJsonRef.current = prevSynced;   // 不推進基準、不寫入 → 雲端維持原樣
+                setSyncStatus('idle');
+                return;
+              }
+              shrinkApprovedRef.current = true;       // 本編輯段落已確認，不重複詢問
+            }
+          }
+        } catch (e) {}
         syncedJsonRef.current = localJson;                     // 樂觀推進，避免寫入在途期間重複觸發
         const writeId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
         lastWriteIdRef.current = writeId;
@@ -1519,6 +1546,7 @@
                 setBoardColumns(payload.boardColumns);
                 // 記錄「已與雲端一致」的 healed 版本（key 順序須與 buildLocalPayload 一致），寫效果才不會多寫一次
                 syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap, knowledge: payload.knowledge, deletedNotes: payload.deletedNotes, boardColumns: payload.boardColumns });
+                shrinkApprovedRef.current = false;   // 有新的雲端基準 → 重置驟減確認，下次大幅減少會再提醒
               }
             }
             // exists 或 not-exists（首次登入）都算「成功讀到」→ 之後才允許寫入
