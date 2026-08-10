@@ -1269,6 +1269,11 @@
       const transferCol = cols.find((c) => c && typeof c.title === 'string' && c.title.includes('移轉'));
       const moveTo = (taskId, zoneId) => { setTasks(list.map((t) => { if (!t || t.id !== taskId) return t; return { ...t, zone: zoneId === 'none' ? undefined : zoneId }; })); };
       const addToZone = (text, zoneId) => { const v = (text || '').trim(); if (!v) return; const nt = { id: Date.now().toString(), text: v, type: 'work', category: '', period: '不指定時段', deadline: '', status: 'todo', timeSpent: 0, logs: [], assignee: '', note: '', zone: zoneId === 'none' ? undefined : zoneId, createdAt: new Date().toISOString() }; setTasks(prev => [nt, ...(Array.isArray(prev) ? prev : [])]); };
+      // 同一欄內排序：把「畫面上同欄顯示中的任務」在 tasks 陣列裡的位置對調/移動
+      const sameZoneIdx = (arr, zid) => { const out = []; arr.forEach((x, i) => { if (x && x.status !== 'done' && matchQ(x)) { const z = (x.zone && zoneIdsNoNone.has(x.zone)) ? x.zone : 'none'; if (z === zid) out.push(i); } }); return out; };
+      const zoneMove = (taskId, dir) => setTasks(prev => { const arr = [...prev]; const me = arr.find(x => x && x.id === taskId); if (!me) return prev; const zid = (me.zone && zoneIdsNoNone.has(me.zone)) ? me.zone : 'none'; const s = sameZoneIdx(arr, zid); const pos = s.findIndex(i => arr[i].id === taskId); const tgt = pos + (dir < 0 ? -1 : 1); if (pos < 0 || tgt < 0 || tgt >= s.length) return prev; const i1 = s[pos], i2 = s[tgt]; const tmp = arr[i1]; arr[i1] = arr[i2]; arr[i2] = tmp; return arr; });
+      const zoneEdge = (taskId, edge) => setTasks(prev => { const arr = [...prev]; const di = arr.findIndex(x => x && x.id === taskId); if (di < 0) return prev; const me = arr[di]; const zid = (me.zone && zoneIdsNoNone.has(me.zone)) ? me.zone : 'none'; arr.splice(di, 1); const s = sameZoneIdx(arr, zid); if (edge === 'top') { const at = s.length ? s[0] : arr.length; arr.splice(at, 0, me); } else { const at = s.length ? s[s.length - 1] + 1 : arr.length; arr.splice(at, 0, me); } return arr; });
+      const zoneDrop = (draggedId, targetId, zid) => { if (!draggedId || draggedId === targetId) return; setTasks(prev => { const arr = [...prev]; const di = arr.findIndex(x => x && x.id === draggedId); if (di < 0) return prev; let dragged = arr[di]; const nz = zid === 'none' ? undefined : zid; if ((dragged.zone || undefined) !== (nz || undefined)) dragged = { ...dragged, zone: nz }; arr.splice(di, 1); if (targetId) { const ti = arr.findIndex(x => x && x.id === targetId); if (ti >= 0) { arr.splice(ti, 0, dragged); return arr; } } arr.push(dragged); return arr; }); };
       const fmtDeadline = (d) => { if (!d) return ''; try { const dt = new Date(d); if (isNaN(dt.getTime())) return String(d); const mm = String(dt.getMonth() + 1).padStart(2, '0'); const dd = String(dt.getDate()).padStart(2, '0'); return `${dt.getFullYear()}/${mm}/${dd}`; } catch (e) { return String(d); } };
       const addZone = () => { const name = (window.prompt('新增欄位名稱（例如：高優先、等回覆、本週…）：', '') || '').trim(); if (!name) return; setZones && setZones(normalizeZones([...zoneList.filter(z => z.id !== 'none'), { id: 'fz_' + Date.now().toString(36), title: name, builtin: false }, { id: 'none', title: '未指定', builtin: true }])); };
       const renameZone = (zid) => { const cur = zoneList.find(z => z.id === zid); const name = (window.prompt('欄位名稱：', cur ? cur.title : '') || '').trim(); if (!name) return; setZones && setZones(zoneList.map(z => z.id === zid ? { ...z, title: name } : z)); };
@@ -1278,8 +1283,16 @@
         if (!task) return null;
         const text = task.text || '(未命名任務)'; const category = task.category || ''; const deadline = task.deadline ? fmtDeadline(task.deadline) : '';
         return (
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex flex-col gap-3">
-            <p onClick={() => onOpenDetail && onOpenDetail(task.id)} title="點一下打開完整內容作業（備註、計時、子任務、連結…）" className={'text-sm font-medium text-slate-800 break-words leading-relaxed' + (onOpenDetail ? ' cursor-pointer hover:text-indigo-600' : '')}>{text}</p>
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex flex-col gap-3" draggable onDragStart={(e) => e.dataTransfer.setData('fzTaskId', task.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const id = e.dataTransfer.getData('fzTaskId'); if (id) zoneDrop(id, task.id, zone); }}>
+            <div className="flex items-start gap-2">
+              <p onClick={() => onOpenDetail && onOpenDetail(task.id)} title="點一下打開完整內容作業（備註、計時、子任務、連結…）" className={'flex-1 text-sm font-medium text-slate-800 break-words leading-relaxed' + (onOpenDetail ? ' cursor-pointer hover:text-indigo-600' : '')}>{text}</p>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button onClick={() => zoneEdge(task.id, 'top')} title="移到本欄最上面" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"><ChevronsUp className="w-3.5 h-3.5" /></button>
+                <button onClick={() => zoneMove(task.id, -1)} title="上移一格" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">↑</button>
+                <button onClick={() => zoneMove(task.id, 1)} title="下移一格" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">↓</button>
+                <button onClick={() => zoneEdge(task.id, 'bottom')} title="移到本欄最下面" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"><ChevronsDown className="w-3.5 h-3.5" /></button>
+              </div>
+            </div>
             {(category || deadline) && (
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 {category && (<span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-100">{category}</span>)}
@@ -1329,8 +1342,8 @@
                   <div className="px-3 pb-2">
                     <input type="text" value={addMap[z.id] || ''} onChange={(e) => setAddMap(m => ({ ...m, [z.id]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter' && (addMap[z.id] || '').trim()) { addToZone(addMap[z.id], z.id); setAddMap(m => ({ ...m, [z.id]: '' })); } }} placeholder={'＋ 新增到「' + z.title + '」'} className="w-full bg-white/80 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-200 border border-slate-200" />
                   </div>
-                  <div className="px-3 pb-3 flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: '60vh' }}>
-                    {items.length === 0 ? (<div className="text-center text-xs text-slate-400 py-8 px-2">還沒有任務，用上面的框新增，或把別欄任務「移到」這裡</div>) : (items.map((t) => <FZCard key={t.id} task={t} zone={z.id} />))}
+                  <div className="px-3 pb-3 flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: '60vh' }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { const id = e.dataTransfer.getData('fzTaskId'); if (id) zoneDrop(id, null, z.id); }}>
+                    {items.length === 0 ? (<div className="text-center text-xs text-slate-400 py-8 px-2">還沒有任務，用上面的框新增，或把別欄任務「移到」這裡（也可以直接拖曳卡片到這）</div>) : (items.map((t) => <FZCard key={t.id} task={t} zone={z.id} />))}
                   </div>
                 </div>
               );
