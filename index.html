@@ -53,7 +53,7 @@
       LayoutDashboard, List as ListIcon, PenSquare, MessageSquare, BarChart2, 
       Settings, BookOpen, Plus, Search, Filter, Calendar, Clock, User, 
       Trash2, Edit2, Play, Square, CheckCircle, ChevronDown, PieChart as PieChartIcon, 
-      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle, Mail, Send, RotateCcw, Trash, ArrowRightCircle
+      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle, Mail, Send, RotateCcw, Trash, ArrowRightCircle, ChevronsUp, ChevronsDown
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, setPersistence, browserLocalPersistence } from 'firebase/auth';
@@ -220,7 +220,7 @@
     });
 
     // 任務卡片元件
-    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, compact, onArchive, boardColumns, moveTaskInColumn, linkedTasks, onOpenLinkPicker, onJumpTask, onUnlink, statusTitle }) => {
+    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, compact, onArchive, boardColumns, moveTaskInColumn, moveTaskToEdge, linkedTasks, onOpenLinkPicker, onJumpTask, onUnlink, statusTitle }) => {
       const isRunning = activeTimer === task.id;
       const projectInfo = projects.find(p => p.name === task.category);
       const projectColor = projectInfo?.color || '#cbd5e1';
@@ -327,8 +327,10 @@
               )}
               {moveTaskInColumn && (
                 <div className="flex items-center gap-1 ml-auto">
-                  <button onClick={(e) => { e.stopPropagation(); moveTaskInColumn(task.id, -1); }} onDragStart={stopDragAndDrop} title="這欄內往上移" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors">↑</button>
-                  <button onClick={(e) => { e.stopPropagation(); moveTaskInColumn(task.id, 1); }} onDragStart={stopDragAndDrop} title="這欄內往下移" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors">↓</button>
+                  {moveTaskToEdge && <button onClick={(e) => { e.stopPropagation(); moveTaskToEdge(task.id, 'top'); }} onDragStart={stopDragAndDrop} title="移到這欄最上面" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors"><ChevronsUp className="w-4 h-4" /></button>}
+                  <button onClick={(e) => { e.stopPropagation(); moveTaskInColumn(task.id, -1); }} onDragStart={stopDragAndDrop} title="往上移一格" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors">↑</button>
+                  <button onClick={(e) => { e.stopPropagation(); moveTaskInColumn(task.id, 1); }} onDragStart={stopDragAndDrop} title="往下移一格" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors">↓</button>
+                  {moveTaskToEdge && <button onClick={(e) => { e.stopPropagation(); moveTaskToEdge(task.id, 'bottom'); }} onDragStart={stopDragAndDrop} title="移到這欄最下面" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors"><ChevronsDown className="w-4 h-4" /></button>}
                 </div>
               )}
             </div>
@@ -1884,6 +1886,28 @@
         });
       }, []);
 
+      // 一鍵把任務移到同欄最上面 / 最下面
+      const moveTaskToEdge = useCallback((taskId, edge) => {
+        setTasks(prev => {
+          const arr = [...prev];
+          const di = arr.findIndex(t => t && t.id === taskId);
+          if (di < 0) return prev;
+          const me = arr[di];
+          const col = me.status || 'todo';
+          arr.splice(di, 1);
+          const sameIdx = [];
+          arr.forEach((x, i) => { if (x && (x.status || 'todo') === col) sameIdx.push(i); });
+          if (edge === 'top') {
+            const at = sameIdx.length ? sameIdx[0] : arr.length;
+            arr.splice(at, 0, me);
+          } else {
+            const at = sameIdx.length ? sameIdx[sameIdx.length - 1] + 1 : arr.length;
+            arr.splice(at, 0, me);
+          }
+          return arr;
+        });
+      }, []);
+
       // 自由拖曳排序：把 draggedId 移到 targetId 的位置（插在它前面）；跨欄時順便改狀態。targetId 空＝丟到該欄最後
       const moveTaskRelative = useCallback((draggedId, targetId, colId) => {
         if (!draggedId || draggedId === targetId) return;
@@ -2163,7 +2187,7 @@
                   <div className="flex flex-col gap-0 min-h-[200px]">
                      {data.map(task => (
                         <div key={task.id} id={'taskcard-' + task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)} onDragOver={e=>{ e.preventDefault(); }} onDrop={(e)=>{ e.preventDefault(); e.stopPropagation(); const draggedId = e.dataTransfer.getData('taskId'); if(draggedId) moveTaskRelative(draggedId, task.id, col.id); }}>
-                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} linkedTasks={(task.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }))} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={jumpToTask} onUnlink={unlinkTasks} statusTitle={statusTitle} />
+                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} moveTaskToEdge={moveTaskToEdge} linkedTasks={(task.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }))} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={jumpToTask} onUnlink={unlinkTasks} statusTitle={statusTitle} />
                         </div>
                      ))}
                      {data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">{searching ? '查無符合' : '無任務或拖曳至此'}</div>}
