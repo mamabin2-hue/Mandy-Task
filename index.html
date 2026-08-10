@@ -1884,6 +1884,25 @@
         });
       }, []);
 
+      // 自由拖曳排序：把 draggedId 移到 targetId 的位置（插在它前面）；跨欄時順便改狀態。targetId 空＝丟到該欄最後
+      const moveTaskRelative = useCallback((draggedId, targetId, colId) => {
+        if (!draggedId || draggedId === targetId) return;
+        setTasks(prev => {
+          const arr = [...prev];
+          const di = arr.findIndex(t => t && t.id === draggedId);
+          if (di < 0) return prev;
+          let dragged = arr[di];
+          if (colId && (dragged.status || 'todo') !== colId) dragged = { ...dragged, status: colId };
+          arr.splice(di, 1);
+          if (targetId) {
+            const ti = arr.findIndex(t => t && t.id === targetId);
+            if (ti >= 0) { arr.splice(ti, 0, dragged); return arr; }
+          }
+          arr.push(dragged);
+          return arr;
+        });
+      }, []);
+
       // 點連結任務 → 跳到看板該卡片、捲到畫面中央並閃一下提示
       useEffect(() => {
         if (!focusTaskId) return;
@@ -2053,7 +2072,8 @@
       const searching = searchQuery.trim().length > 0;
 
       // 計時中置頂：正在計時的任務排到欄位最上面（其餘維持原順序，sort 為穩定排序）
-      const orderColumn = (arr) => [...arr].sort((a, b) => (a.id === activeTimer ? -1 : 0) - (b.id === activeTimer ? -1 : 0));
+      // 不再把計時中任務強制置頂（會擋住手動排序）；計時中任務已用上方橫幅提醒。看板順序＝你手動排的順序
+      const orderColumn = (arr) => arr;
 
       const renderBoard = () => {
         let filtered = tasks.filter(t => !t.archived);   // 已歸檔到知識庫的任務不再顯示於看板
@@ -2135,14 +2155,14 @@
                 data = orderColumn(data);
                 const Icon = style.icon;
                 return (
-                <div key={col.id} className={`flex-1 w-full flex flex-col gap-4 p-4 rounded-3xl border ${style.bg}`} onDragOver={e=>e.preventDefault()} onDrop={(e)=>{ const taskId = e.dataTransfer.getData('taskId'); if(taskId) toggleStatus(taskId, col.id); }}>
+                <div key={col.id} className={`flex-1 w-full flex flex-col gap-4 p-4 rounded-3xl border ${style.bg}`} onDragOver={e=>e.preventDefault()} onDrop={(e)=>{ const taskId = e.dataTransfer.getData('taskId'); if(taskId) moveTaskRelative(taskId, null, col.id); }}>
                   <div className="flex items-center justify-between px-2">
                     <h3 className={`text-lg font-black ${style.text} flex items-center gap-2`}><Icon className={`w-5 h-5 ${style.iconColor}`} /> {col.title}</h3>
                     <span className="bg-white text-slate-500 text-sm font-black px-3 py-1 rounded-full shadow-sm border border-slate-200">{data.length}</span>
                   </div>
                   <div className="flex flex-col gap-0 min-h-[200px]">
                      {data.map(task => (
-                        <div key={task.id} id={'taskcard-' + task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)}>
+                        <div key={task.id} id={'taskcard-' + task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)} onDragOver={e=>{ e.preventDefault(); }} onDrop={(e)=>{ e.preventDefault(); e.stopPropagation(); const draggedId = e.dataTransfer.getData('taskId'); if(draggedId) moveTaskRelative(draggedId, task.id, col.id); }}>
                           <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} linkedTasks={(task.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }))} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={jumpToTask} onUnlink={unlinkTasks} statusTitle={statusTitle} />
                         </div>
                      ))}
