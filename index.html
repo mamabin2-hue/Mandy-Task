@@ -15,6 +15,9 @@
     .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 20px; border: 3px solid transparent; background-clip: content-box; }
     .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: #94a3b8; }
     body { font-family: "Microsoft JhengHei", "微軟正黑體", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background-color: #f8fafc; }
+    /* 點連結任務跳過去時，卡片閃一下提示 */
+    @keyframes mtFlash { 0%,100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); } 30% { box-shadow: 0 0 0 4px rgba(99,102,241,0.55); } }
+    .mt-flash { animation: mtFlash 1.5s ease-in-out; border-radius: 1rem; }
     /* 觸控裝置沒有 hover：強制顯示所有「滑鼠移上去才浮現」的動作鈕（刪除/編輯/移除圖等），否則手機摸不到 */
     @media (hover: none) {
       [class*="group-hover"][class*="opacity-100"] { opacity: 1 !important; }
@@ -217,7 +220,7 @@
     });
 
     // 任務卡片元件
-    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, compact, onArchive, boardColumns, moveTaskInColumn }) => {
+    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, compact, onArchive, boardColumns, moveTaskInColumn, linkedTasks, onOpenLinkPicker, onJumpTask, onUnlink, statusTitle }) => {
       const isRunning = activeTimer === task.id;
       const projectInfo = projects.find(p => p.name === task.category);
       const projectColor = projectInfo?.color || '#cbd5e1';
@@ -312,13 +315,16 @@
 
           {Array.isArray(boardColumns) && boardColumns.length > 0 && (
             <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 bg-white">
+              <span className="text-[11px] font-black text-slate-400 shrink-0">狀態</span>
               <div className="relative">
-                <select className="appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-black py-1.5 pl-3 pr-7 rounded-full shadow-sm outline-none cursor-pointer hover:border-indigo-300 transition-colors" value={boardColumns.some(c => c.id === (task.status || 'todo')) ? (task.status || 'todo') : ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onChange={(e) => { if (e.target.value) toggleStatus(task.id, e.target.value); }} title="移到其他欄位（不用拖曳）">
-                  <option value="" disabled>移到…</option>
-                  {boardColumns.map(c => <option key={c.id} value={c.id}>移到「{c.title}」</option>)}
+                <select className="appearance-none bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-black py-1.5 pl-3 pr-7 rounded-full shadow-sm outline-none cursor-pointer hover:border-indigo-300 transition-colors" value={boardColumns.some(c => c.id === (task.status || 'todo')) ? (task.status || 'todo') : 'todo'} onClick={stopDrag} onDragStart={stopDragAndDrop} onChange={(e) => { if (e.target.value) toggleStatus(task.id, e.target.value); }} title="切換狀態：移到完成／暫緩／移轉中等欄位（不用拖曳）">
+                  {boardColumns.map(c => <option key={c.id} value={c.id}>{c.title}</option>)}
                 </select>
                 <ChevronDown className="w-3 h-3 text-indigo-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
               </div>
+              {compact && Array.isArray(linkedTasks) && linkedTasks.length > 0 && (
+                <span className="inline-flex items-center gap-0.5 text-[11px] font-black text-indigo-500" title={'有 ' + linkedTasks.length + ' 個相關任務（改狀態會問要不要一起變）；切到完整檢視可管理'}><ArrowRightCircle className="w-3.5 h-3.5" />{linkedTasks.length}</span>
+              )}
               {moveTaskInColumn && (
                 <div className="flex items-center gap-1 ml-auto">
                   <button onClick={(e) => { e.stopPropagation(); moveTaskInColumn(task.id, -1); }} onDragStart={stopDragAndDrop} title="這欄內往上移" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors">↑</button>
@@ -383,6 +389,27 @@
               <span className={`w-4 h-4 rounded flex items-center justify-center border ${task.syncToJira ? 'bg-white border-white' : 'border-slate-300'}`}>{task.syncToJira && <Check className="w-3 h-3 text-sky-600" />}</span>
               同步到 Jira{task.jiraKey ? `（已建立 ${task.jiraKey}）` : task.syncToJira ? '（待下次同步）' : ''}
             </button>
+
+            {onOpenLinkPicker && (
+              <div className="mt-2 flex flex-col gap-2 pt-3 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-bold text-slate-400 flex items-center gap-1.5 min-w-0"><ArrowRightCircle className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">相關任務（點名稱跳過去）</span></div>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); onOpenLinkPicker(task); }} onDragStart={stopDragAndDrop} className="text-xs font-black text-indigo-600 hover:text-indigo-800 shrink-0">+ 連結任務</button>
+                </div>
+                {Array.isArray(linkedTasks) && linkedTasks.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {linkedTasks.map(lt => (
+                      <span key={lt.id} className="inline-flex items-center gap-1 max-w-[220px] pl-2.5 pr-1 py-1 rounded-full bg-indigo-50 border border-indigo-200 text-xs font-bold text-indigo-700">
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onJumpTask && onJumpTask(lt.id); }} onDragStart={stopDragAndDrop} title="跳到這個任務" className="truncate hover:underline min-w-0">{(statusTitle ? '【' + statusTitle(lt.status || 'todo') + '】' : '') + (lt.text || '(未命名)')}</button>
+                        <button type="button" onClick={(e) => { e.stopPropagation(); onUnlink && onUnlink(task.id, lt.id); }} onDragStart={stopDragAndDrop} title="取消連結" className="w-4 h-4 rounded-full flex items-center justify-center text-indigo-400 hover:bg-indigo-200 hover:text-indigo-700 shrink-0"><X className="w-3 h-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-xs text-slate-400">還沒有連結的任務，點「+ 連結任務」加入相關聯的任務。</div>
+                )}
+              </div>
+            )}
 
             <div className="mt-2 flex flex-col gap-2 pt-3 border-t border-slate-100">
               <div className="text-xs font-bold text-slate-400 flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> 投入歷程與補登</div>
@@ -1323,6 +1350,9 @@
     function TaskManager({ uid, userEmail }) {
       const [activeView, setActiveView] = useState('board');
       const [searchQuery, setSearchQuery] = useState('');
+      const [linkPickerFor, setLinkPickerFor] = useState(null);   // 正在為哪個任務挑選連結對象（存 task 物件）
+      const [linkPickerQ, setLinkPickerQ] = useState('');
+      const [focusTaskId, setFocusTaskId] = useState(null);       // 點連結任務要跳去 highlight 的任務 id
       const [sheetSort, setSheetSort] = useState({ key: 'createdAt', dir: 'desc' }); // 任務總表排序
       const [sheetFilters, setSheetFilters] = useState({ status: [], category: [], period: [], assignee: [] }); // 任務總表 Excel 式欄位篩選（空=全部）
       const [openFilter, setOpenFilter] = useState(null); // 目前展開的篩選欄
@@ -1763,22 +1793,58 @@
 
       const deleteTask = useCallback((taskId) => {
         showDialog('刪除任務', '確定要永久刪除此任務嗎？此動作無法復原。', () => {
-          setTasks(prev => prev.filter(t => t.id !== taskId));
+          setTasks(prev => prev.filter(t => t.id !== taskId)
+            .map(t => (t && Array.isArray(t.linkedIds) && t.linkedIds.includes(taskId)) ? { ...t, linkedIds: t.linkedIds.filter(x => x !== taskId) } : t));
           if(activeTimer === taskId) setActiveTimer(null);
           closeDialog();
         }, 'danger');
       }, [activeTimer]);
 
+      // —— 任務連結 + 狀態連動 —— 用 ref 讀最新 tasks/boardColumns，避免 useCallback stale
+      const tasksRef = useRef([]); tasksRef.current = tasks;
+      const boardColumnsRef = useRef(DEFAULT_BOARD_COLUMNS); boardColumnsRef.current = boardColumns;
+      const statusTitle = (s) => { if (s === 'done') return '完成'; const c = (boardColumnsRef.current || []).find(x => x && x.id === s); return c ? c.title : s; };
+      // 回傳「要跟著一起改狀態」的連結任務 id 陣列（有連結且狀態不同才問；使用者確認才連動）
+      const resolveLinkedStatus = (taskId, status) => {
+        const arr = tasksRef.current || [];
+        const me = arr.find(t => t && t.id === taskId);
+        const links = (me && Array.isArray(me.linkedIds)) ? me.linkedIds : [];
+        const targets = links.map(id => arr.find(t => t && t.id === id)).filter(t => t && (t.status || 'todo') !== status);
+        if (!targets.length) return [];
+        const ok = window.confirm('這個任務有連結 ' + targets.length + ' 個相關任務。\n要一起改成「' + statusTitle(status) + '」嗎？\n\n按「確定」一起改；「取消」只改這一個。');
+        return ok ? targets.map(t => t.id) : [];
+      };
+      const linkTasks = useCallback((aId, bId) => {
+        if (!aId || !bId || aId === bId) return;
+        setTasks(prev => prev.map(t => {
+          if (!t) return t;
+          if (t.id === aId) { const s = new Set(t.linkedIds || []); s.add(bId); return { ...t, linkedIds: [...s] }; }
+          if (t.id === bId) { const s = new Set(t.linkedIds || []); s.add(aId); return { ...t, linkedIds: [...s] }; }
+          return t;
+        }));
+      }, []);
+      const unlinkTasks = useCallback((aId, bId) => {
+        setTasks(prev => prev.map(t => {
+          if (!t) return t;
+          if (t.id === aId) return { ...t, linkedIds: (t.linkedIds || []).filter(x => x !== bId) };
+          if (t.id === bId) return { ...t, linkedIds: (t.linkedIds || []).filter(x => x !== aId) };
+          return t;
+        }));
+      }, []);
+      const jumpToTask = useCallback((id) => { if (!id) return; setActiveView('board'); setFocusTaskId(id); }, []);
+
       const toggleStatus = useCallback((taskId, targetStatus) => {
-        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: targetStatus } : t));
+        const alsoIds = new Set([taskId, ...resolveLinkedStatus(taskId, targetStatus)]);
+        setTasks(prev => prev.map(t => t && alsoIds.has(t.id) ? { ...t, status: targetStatus } : t));
       }, []);
 
       // 直接把任務改成某狀態（供工作台的「完成 / 移轉中」用）；若正在計時就收尾把時間記進 logs，避免時數遺失
       const markTaskStatus = useCallback((taskId, status) => {
-        setTasks(prev => prev.map(t => {
-          if (t.id !== taskId) return t;
+        const linkedAlso = new Set(resolveLinkedStatus(taskId, status));
+        // 收尾計時的共用邏輯：把還沒結束的那筆 log 補上結束時間與時數，避免改狀態時時數遺失
+        const closeTimer = (t) => {
           const nt = { ...t, status };
-          if (activeTimer === taskId && Array.isArray(t.logs) && t.logs.length) {
+          if (Array.isArray(t.logs) && t.logs.length) {
             const lastLog = t.logs[t.logs.length - 1];
             if (lastLog && !lastLog.end) {
               const now = new Date();
@@ -1790,8 +1856,14 @@
             }
           }
           return nt;
+        };
+        setTasks(prev => prev.map(t => {
+          if (t.id === taskId) return (activeTimer === taskId) ? closeTimer(t) : { ...t, status };
+          if (linkedAlso.has(t.id)) return (activeTimer === t.id) ? closeTimer(t) : { ...t, status };
+          return t;
         }));
-        if (activeTimer === taskId) setActiveTimer(null);
+        // 主任務或被連動任務若正在計時 → 停掉計時器（狀態已改、計時已收尾）
+        if (activeTimer === taskId || linkedAlso.has(activeTimer)) setActiveTimer(null);
       }, [activeTimer]);
 
       // 看板同一欄內上下調整順序（dir=-1 往前、1 往後）：在同狀態的鄰居間交換於 tasks 陣列的位置
@@ -1811,6 +1883,22 @@
           return arr;
         });
       }, []);
+
+      // 點連結任務 → 跳到看板該卡片、捲到畫面中央並閃一下提示
+      useEffect(() => {
+        if (!focusTaskId) return;
+        const id = focusTaskId;
+        const timer = setTimeout(() => {
+          const el = document.getElementById('taskcard-' + id);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.add('mt-flash');
+            setTimeout(() => { try { el.classList.remove('mt-flash'); } catch (e) {} }, 1600);
+          }
+          setFocusTaskId(null);   // 在 timeout 內才清，避免依賴變動觸發 cleanup 把這個 timer 提前取消（跳轉會失效）
+        }, 80);
+        return () => clearTimeout(timer);
+      }, [focusTaskId]);
 
       const toggleTimer = useCallback((taskId) => {
         setTasks(prev => {
@@ -2054,8 +2142,8 @@
                   </div>
                   <div className="flex flex-col gap-0 min-h-[200px]">
                      {data.map(task => (
-                        <div key={task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)}>
-                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} />
+                        <div key={task.id} id={'taskcard-' + task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)}>
+                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} linkedTasks={(task.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }))} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={jumpToTask} onUnlink={unlinkTasks} statusTitle={statusTitle} />
                         </div>
                      ))}
                      {data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">{searching ? '查無符合' : '無任務或拖曳至此'}</div>}
@@ -2229,6 +2317,54 @@
                 </div>
               </div>
             )}
+
+            {linkPickerFor && (() => {
+              const self = linkPickerFor;
+              const already = new Set([self.id, ...((self.linkedIds) || [])]);
+              const kw = linkPickerQ.trim().toLowerCase();
+              const candidates = (Array.isArray(tasks) ? tasks : [])
+                .filter(t => t && !already.has(t.id))
+                .filter(t => { if (!kw) return true; const hay = [t.text, t.category, t.assignee].map(x => String(x || '').toLowerCase()).join(' '); return hay.includes(kw); })
+                .slice(0, 200);
+              return (
+                <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 animate-in fade-in duration-150" onClick={() => setLinkPickerFor(null)}>
+                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                    <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                      <div className="min-w-0">
+                        <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><ArrowRightCircle className="w-5 h-5 text-indigo-600" /> 連結相關任務</h3>
+                        <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">為「{self.text || '(未命名)'}」加入相關任務（可多個）</p>
+                      </div>
+                      <button onClick={() => setLinkPickerFor(null)} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 shrink-0" title="關閉"><X className="w-5 h-5" /></button>
+                    </div>
+                    <div className="px-4 pt-3">
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                        <input type="text" value={linkPickerQ} onChange={(e) => setLinkPickerQ(e.target.value)} autoFocus placeholder="搜尋任務 / 分類 / 人員…" className="w-full pl-9 pr-8 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200" />
+                        {linkPickerQ && <button onClick={() => setLinkPickerQ('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>}
+                      </div>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4">
+                      {candidates.length === 0 ? (
+                        <div className="text-center text-slate-400 font-bold py-10 text-sm">找不到可連結的任務</div>
+                      ) : (
+                        <div className="flex flex-col gap-1.5">
+                          {candidates.map(t => (
+                            <button key={t.id} onClick={() => { linkTasks(self.id, t.id); setLinkPickerFor(prev => prev ? { ...prev, linkedIds: [...((prev.linkedIds) || []), t.id] } : prev); }} className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl border border-slate-150 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 transition-colors text-left">
+                              <div className="min-w-0">
+                                <div className="font-bold text-slate-800 text-sm truncate">{t.text || '(未命名)'}</div>
+                                <div className="text-xs font-bold text-slate-400 mt-0.5 truncate">{[t.category, statusTitle ? statusTitle(t.status || 'todo') : ''].filter(Boolean).join(' · ')}</div>
+                              </div>
+                              <span className="shrink-0 text-xs font-black text-indigo-600">+ 連結</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 text-[11px] font-bold text-slate-400">點任務即可連結；連結是雙向的，兩邊都看得到彼此。完成後按右上角關閉。</div>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         );
       };
