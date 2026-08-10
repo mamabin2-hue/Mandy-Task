@@ -53,7 +53,7 @@
       AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle, Mail, Send, RotateCcw, Trash
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
-    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, setPersistence, browserLocalPersistence } from 'firebase/auth';
     import { getFirestore, doc, onSnapshot, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 
     // Firebase 連線設定（apiKey 為網頁版公開金鑰，安全由 Firestore 規則 + 登入控管）
@@ -67,6 +67,8 @@
     };
     const fbApp = initializeApp(firebaseConfig);
     const fbAuth = getAuth(fbApp);
+    // 保持長期登入：把登入狀態存在本機（IndexedDB），除非自己按登出，否則不用每天重登、重新整理也不掉登入
+    setPersistence(fbAuth, browserLocalPersistence).catch(() => {});
     const fbDb = getFirestore(fbApp);
 
     // 系統預設資料
