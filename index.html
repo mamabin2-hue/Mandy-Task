@@ -196,6 +196,29 @@
       return result;
     };
 
+    // 工作台分區（可自訂，像看板）。內建：今日集中/暫緩/未指定；「未指定」永遠是最後一欄且為未歸類任務的收容欄
+    const FOCUS_BUILTIN_IDS = ['focus', 'hold', 'none'];
+    const DEFAULT_FOCUS_ZONES = [
+      { id: 'focus', title: '今日集中', builtin: true },
+      { id: 'hold', title: '暫緩', builtin: true },
+      { id: 'none', title: '未指定', builtin: true },
+    ];
+    const normalizeZones = (zs) => {
+      const arr = Array.isArray(zs) ? zs.filter(z => z && z.id && z.title != null) : [];
+      if (!arr.length) return DEFAULT_FOCUS_ZONES;
+      let result = arr.map(z => ({ id: String(z.id), title: String(z.title), builtin: FOCUS_BUILTIN_IDS.includes(String(z.id)) }));
+      if (!result.some(z => z.id === 'focus')) result.unshift({ id: 'focus', title: '今日集中', builtin: true });
+      if (!result.some(z => z.id === 'hold')) {
+        const ni = result.findIndex(z => z.id === 'none');
+        const item = { id: 'hold', title: '暫緩', builtin: true };
+        if (ni >= 0) result.splice(ni, 0, item); else result.push(item);
+      }
+      // 「未指定」一定要在，且移到最後
+      result = result.filter(z => z.id !== 'none');
+      result.push({ id: 'none', title: '未指定', builtin: true });
+      return result;
+    };
+
     // 貼圖壓縮：讀圖→畫到 canvas 縮到 maxDim→輸出小 JPEG dataURL（控制雲端單檔大小）
     const compressImage = (fileOrBlob, maxDim = 320, quality = 0.55) => new Promise((resolve, reject) => {
       try {
@@ -1232,22 +1255,25 @@
     };
 
     // 工作台：今日集中 / 暫緩 / 未指定（透過 setTasks 只改 zone 欄位回拋。平行 Agent 產出，整合時已回歸測試）
-    const FocusZones = ({ tasks, setTasks, boardColumns, onSetStatus, onAddTask, onOpenDetail }) => {
+    const FocusZones = ({ tasks, setTasks, boardColumns, zones, setZones, onSetStatus, onAddTask, onOpenDetail }) => {
       const [q, setQ] = useState('');
-      const [addText, setAddText] = useState('');
+      const [addMap, setAddMap] = useState({});   // {zoneId: 輸入字串}
+      const zoneList = Array.isArray(zones) && zones.length ? zones : DEFAULT_FOCUS_ZONES;
+      const zoneIdsNoNone = new Set(zoneList.filter(z => z.id !== 'none').map(z => z.id));
       const list = Array.isArray(tasks) ? tasks : [];
       const kw = q.trim().toLowerCase();
       const matchQ = (t) => { if (!kw) return true; const hay = [t && t.text, t && t.category, t && t.assignee, t && t.note].map(x => String(x || '').toLowerCase()).join(' '); return hay.includes(kw); };
       const active = list.filter((t) => t && t.status !== 'done' && matchQ(t));
-      const zoneOf = (t) => { const z = t && t.zone; return z === 'focus' || z === 'hold' ? z : 'none'; };
-      const focusTasks = active.filter((t) => zoneOf(t) === 'focus');
-      const holdTasks = active.filter((t) => zoneOf(t) === 'hold');
-      const noneTasks = active.filter((t) => zoneOf(t) === 'none');
-      // 找出使用者看板裡的「移轉中」欄位（標題含「移轉」），供卡片上的「移轉中」鈕使用
+      const zoneOf = (t) => { const z = t && t.zone; return (z && zoneIdsNoNone.has(z)) ? z : 'none'; };
       const cols = Array.isArray(boardColumns) ? boardColumns : [];
       const transferCol = cols.find((c) => c && typeof c.title === 'string' && c.title.includes('移轉'));
-      const moveTo = (taskId, nextZone) => { setTasks(list.map((t) => { if (!t || t.id !== taskId) return t; const z = nextZone === 'focus' || nextZone === 'hold' ? nextZone : undefined; return { ...t, zone: z }; })); };
+      const moveTo = (taskId, zoneId) => { setTasks(list.map((t) => { if (!t || t.id !== taskId) return t; return { ...t, zone: zoneId === 'none' ? undefined : zoneId }; })); };
+      const addToZone = (text, zoneId) => { const v = (text || '').trim(); if (!v) return; const nt = { id: Date.now().toString(), text: v, type: 'work', category: '', period: '不指定時段', deadline: '', status: 'todo', timeSpent: 0, logs: [], assignee: '', note: '', zone: zoneId === 'none' ? undefined : zoneId, createdAt: new Date().toISOString() }; setTasks(prev => [nt, ...(Array.isArray(prev) ? prev : [])]); };
       const fmtDeadline = (d) => { if (!d) return ''; try { const dt = new Date(d); if (isNaN(dt.getTime())) return String(d); const mm = String(dt.getMonth() + 1).padStart(2, '0'); const dd = String(dt.getDate()).padStart(2, '0'); return `${dt.getFullYear()}/${mm}/${dd}`; } catch (e) { return String(d); } };
+      const addZone = () => { const name = (window.prompt('新增欄位名稱（例如：高優先、等回覆、本週…）：', '') || '').trim(); if (!name) return; setZones && setZones(normalizeZones([...zoneList.filter(z => z.id !== 'none'), { id: 'fz_' + Date.now().toString(36), title: name, builtin: false }, { id: 'none', title: '未指定', builtin: true }])); };
+      const renameZone = (zid) => { const cur = zoneList.find(z => z.id === zid); const name = (window.prompt('欄位名稱：', cur ? cur.title : '') || '').trim(); if (!name) return; setZones && setZones(zoneList.map(z => z.id === zid ? { ...z, title: name } : z)); };
+      const deleteZone = (zid) => { const cur = zoneList.find(z => z.id === zid); if (!cur) return; if (!window.confirm('刪除欄位「' + cur.title + '」？\n裡面的任務不會不見，會移到「未指定」。')) return; setTasks(list.map(t => (t && t.zone === zid) ? { ...t, zone: undefined } : t)); setZones && setZones(zoneList.filter(z => z.id !== zid)); };
+      const zoneIcon = (zid) => zid === 'focus' ? Zap : zid === 'hold' ? PauseCircle : zid === 'none' ? CheckCircle : ListIcon;
       const FZCard = ({ task, zone }) => {
         if (!task) return null;
         const text = task.text || '(未命名任務)'; const category = task.category || ''; const deadline = task.deadline ? fmtDeadline(task.deadline) : '';
@@ -1262,50 +1288,56 @@
             )}
             {onOpenDetail && (<button type="button" onClick={() => onOpenDetail(task.id)} className="self-start text-xs font-bold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1"><AlignLeft size={12} />打開內容作業</button>)}
             <div className="flex flex-wrap items-center gap-2 pt-1">
-              {zone !== 'focus' && (<button type="button" onClick={() => moveTo(task.id, 'focus')} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"><Zap size={12} />集中</button>)}
-              {zone !== 'hold' && (<button type="button" onClick={() => moveTo(task.id, 'hold')} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"><PauseCircle size={12} />暫緩</button>)}
-              {zone !== 'none' && (<button type="button" onClick={() => moveTo(task.id, undefined)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"><X size={12} />移除</button>)}
+              <div className="relative">
+                <select value="" onChange={(e) => { if (e.target.value) { moveTo(task.id, e.target.value); e.target.value = ''; } }} className="appearance-none bg-slate-100 text-slate-600 text-xs font-bold py-1 pl-2.5 pr-6 rounded-full outline-none cursor-pointer hover:bg-slate-200 transition-colors" title="移到其他欄位">
+                  <option value="">移到…</option>
+                  {zoneList.filter(z => z.id !== zone).map(z => <option key={z.id} value={z.id}>{z.title}</option>)}
+                </select>
+                <ChevronDown className="w-3 h-3 text-slate-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
               {transferCol && (<button type="button" onClick={() => onSetStatus && onSetStatus(task.id, transferCol.id)} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-700 hover:bg-purple-200 transition-colors" title="改為移轉中"><ArrowRightCircle size={12} />移轉中</button>)}
               <button type="button" onClick={() => onSetStatus && onSetStatus(task.id, 'done')} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition-colors" title="標記完成"><CheckCircle size={12} />完成</button>
             </div>
           </div>
         );
       };
-      const Column = ({ zoneKey, title, icon, items, accent }) => {
-        const styles = accent ? { wrap: 'bg-indigo-50/60 border-indigo-300', head: 'text-indigo-700', badge: 'bg-indigo-600 text-white', iconWrap: 'bg-indigo-100 text-indigo-600' } : { wrap: 'bg-white border-slate-200', head: 'text-slate-700', badge: 'bg-slate-200 text-slate-600', iconWrap: 'bg-slate-100 text-slate-500' };
-        const Icon = icon;
-        return (
-          <div className={`rounded-3xl border shadow-sm flex flex-col ${styles.wrap}`}>
-            <div className="flex items-center justify-between px-4 pt-4 pb-3">
-              <div className="flex items-center gap-2"><span className={`inline-flex items-center justify-center w-7 h-7 rounded-full ${styles.iconWrap}`}><Icon size={16} /></span><span className={`text-sm font-semibold ${styles.head}`}>{title}</span></div>
-              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${styles.badge}`}>{items.length}</span>
-            </div>
-            <div className="px-3 pb-3 flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: '60vh' }}>
-              {items.length === 0 ? (<div className="text-center text-xs text-slate-400 py-8 px-2">{accent ? '把今天要專心做的任務放進來' : zoneKey === 'hold' ? '沒有暫緩中的任務' : '沒有未指定的任務'}</div>) : (items.map((t) => <FZCard key={t.id} task={t} zone={zoneKey} />))}
-            </div>
-          </div>
-        );
-      };
       return (
         <div className="w-full animate-in fade-in duration-300">
-          {onAddTask && (
-            <div className="mb-3 relative">
-              <Plus size={18} className="text-indigo-500 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input type="text" value={addText} onChange={(e) => setAddText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && addText.trim()) { onAddTask(addText); setAddText(''); } }} placeholder="在這裡直接新增任務到「今日集中」…（按 Enter 新增）" className="w-full bg-white text-slate-800 text-sm font-bold pl-11 pr-4 py-3 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-300 border border-slate-200 shadow-sm" />
-            </div>
-          )}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 px-1">
-            <div className="flex items-start gap-2"><Plus size={16} className="text-indigo-500 mt-0.5 shrink-0" /><p className="text-sm text-slate-600">把今天要專心做的放進「今日集中」，先擱著的放「暫緩」（點卡片上的按鈕移動即可）。</p></div>
+            <div className="flex items-start gap-2"><Plus size={16} className="text-indigo-500 mt-0.5 shrink-0" /><p className="text-sm text-slate-600">把任務分到各欄；每欄下方可直接新增任務。欄位可自訂（右上「＋新增欄位」）。</p></div>
             <div className="relative shrink-0">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋任務 / 分類 / 人員…" className="w-full sm:w-64 pl-9 pr-8 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300" />
               {q && <button onClick={() => setQ('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>}
             </div>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <Column zoneKey="focus" title="今日集中" icon={Zap} items={focusTasks} accent />
-            <Column zoneKey="hold" title="暫緩" icon={PauseCircle} items={holdTasks} accent={false} />
-            <Column zoneKey="none" title="未指定" icon={CheckCircle} items={noneTasks} accent={false} />
+          <div className="flex flex-col lg:flex-row flex-wrap gap-4 items-start">
+            {zoneList.map((z) => {
+              const items = active.filter((t) => zoneOf(t) === z.id);
+              const accent = z.id === 'focus';
+              const styles = accent ? { wrap: 'bg-indigo-50/60 border-indigo-300', head: 'text-indigo-700', badge: 'bg-indigo-600 text-white', iconWrap: 'bg-indigo-100 text-indigo-600' } : { wrap: 'bg-white border-slate-200', head: 'text-slate-700', badge: 'bg-slate-200 text-slate-600', iconWrap: 'bg-slate-100 text-slate-500' };
+              const Icon = zoneIcon(z.id);
+              return (
+                <div key={z.id} className={`flex-1 min-w-[260px] w-full rounded-3xl border shadow-sm flex flex-col ${styles.wrap}`}>
+                  <div className="flex items-center justify-between px-4 pt-4 pb-3">
+                    <div className="flex items-center gap-2 min-w-0"><span className={`inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${styles.iconWrap}`}><Icon size={16} /></span><span className={`text-sm font-semibold truncate ${styles.head}`}>{z.title}</span></div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {!z.builtin && (<><button onClick={() => renameZone(z.id)} title="改名" className="w-6 h-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-white"><Edit2 className="w-3.5 h-3.5" /></button><button onClick={() => deleteZone(z.id)} title="刪除欄位" className="w-6 h-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-white"><Trash2 className="w-3.5 h-3.5" /></button></>)}
+                      <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${styles.badge}`}>{items.length}</span>
+                    </div>
+                  </div>
+                  <div className="px-3 pb-2">
+                    <input type="text" value={addMap[z.id] || ''} onChange={(e) => setAddMap(m => ({ ...m, [z.id]: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter' && (addMap[z.id] || '').trim()) { addToZone(addMap[z.id], z.id); setAddMap(m => ({ ...m, [z.id]: '' })); } }} placeholder={'＋ 新增到「' + z.title + '」'} className="w-full bg-white/80 text-slate-700 text-xs font-bold px-3 py-2 rounded-xl outline-none focus:ring-2 focus:ring-indigo-200 border border-slate-200" />
+                  </div>
+                  <div className="px-3 pb-3 flex flex-col gap-3 overflow-y-auto" style={{ maxHeight: '60vh' }}>
+                    {items.length === 0 ? (<div className="text-center text-xs text-slate-400 py-8 px-2">還沒有任務，用上面的框新增，或把別欄任務「移到」這裡</div>) : (items.map((t) => <FZCard key={t.id} task={t} zone={z.id} />))}
+                  </div>
+                </div>
+              );
+            })}
+            <div className="w-full lg:w-48 shrink-0">
+              <button type="button" onClick={addZone} className="w-full min-h-[100px] border-2 border-dashed border-slate-300 rounded-3xl flex flex-col items-center justify-center gap-1 text-slate-400 hover:text-indigo-500 hover:border-indigo-300 hover:bg-indigo-50/30 font-black transition-colors"><Plus className="w-6 h-6" /> 新增欄位</button>
+            </div>
           </div>
         </div>
       );
@@ -1383,6 +1415,7 @@
       const [knowledge, setKnowledge] = useState([]);
       const [deletedNotes, setDeletedNotes] = useState([]);
       const [boardColumns, setBoardColumns] = useState(DEFAULT_BOARD_COLUMNS);
+      const [focusZones, setFocusZones] = useState(DEFAULT_FOCUS_ZONES);
       const noteDraftKey = 'mt_note_draft_' + (uid || 'anon');
       const [noteDraftSaved, setNoteDraftSaved] = useState(false);
       const [lightbox, setLightbox] = useState(null); // 放大檢視的圖片 dataURL
@@ -1493,7 +1526,7 @@
       const buildLocalPayload = () => {
         let catMap = {};
         try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
-        return { tasks, projects, users, notes, catMap, knowledge, deletedNotes, boardColumns };
+        return { tasks, projects, users, notes, catMap, knowledge, deletedNotes, boardColumns, focusZones };
       };
 
       // 每日自動備份：每天第一次載入（且已成功讀到雲端）→ (1) 本機留滾動快照（可靠，可還原） (2) 盡力下載一份 JSON 到電腦
@@ -1586,7 +1619,7 @@
           }
         }, 3000);   // 等連續變動穩定 3 秒再存，避免打字途中頻繁寫入
         return () => clearTimeout(timer);
-      }, [isLoaded, uid, tasks, notes, projects, knowledge, users, deletedNotes, boardColumns]);
+      }, [isLoaded, uid, tasks, notes, projects, knowledge, users, deletedNotes, boardColumns, focusZones]);
 
       // 載入雲端還原點清單（開視窗時呼叫）
       const loadRestorePoints = async () => {
@@ -1617,6 +1650,7 @@
           if (Array.isArray(data.knowledge)) setKnowledge(data.knowledge);
           if (Array.isArray(data.deletedNotes)) setDeletedNotes(data.deletedNotes);
           if (data.boardColumns) setBoardColumns(normalizeColumns(data.boardColumns));
+          if (data.focusZones) setFocusZones(normalizeZones(data.focusZones));
           // 這是使用者「刻意還原」→ 放行本次寫入，避免驟減防呆又跳確認、被誤按取消而白還原
           shrinkApprovedRef.current = true;
           setShowRestorePoints(false);
@@ -1712,7 +1746,8 @@
                   catMap: d.catMap || {},
                   knowledge: Array.isArray(d.knowledge) ? d.knowledge : [],
                   deletedNotes: Array.isArray(d.deletedNotes) ? d.deletedNotes : [],
-                  boardColumns: normalizeColumns(d.boardColumns)
+                  boardColumns: normalizeColumns(d.boardColumns),
+                  focusZones: normalizeZones(d.focusZones)
                 };
                 const healedTasks = payload.tasks.map(t => healTaskData(t));
                 const mergedUsers = [...new Set([...DEFAULT_USERS, ...payload.users])];
@@ -1724,8 +1759,9 @@
                 setKnowledge(payload.knowledge);
                 setDeletedNotes(payload.deletedNotes);
                 setBoardColumns(payload.boardColumns);
+                setFocusZones(payload.focusZones);
                 // 記錄「已與雲端一致」的 healed 版本（key 順序須與 buildLocalPayload 一致），寫效果才不會多寫一次
-                syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap, knowledge: payload.knowledge, deletedNotes: payload.deletedNotes, boardColumns: payload.boardColumns });
+                syncedJsonRef.current = JSON.stringify({ tasks: healedTasks, projects: payload.projects, users: mergedUsers, notes: payload.notes, catMap: payload.catMap, knowledge: payload.knowledge, deletedNotes: payload.deletedNotes, boardColumns: payload.boardColumns, focusZones: payload.focusZones });
                 shrinkApprovedRef.current = false;   // 有新的雲端基準 → 重置驟減確認，下次大幅減少會再提醒
               }
             }
@@ -1754,7 +1790,7 @@
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
         saveTimerRef.current = setTimeout(() => flushSaveRef.current(), 800);
         return () => { if (saveTimerRef.current) { clearTimeout(saveTimerRef.current); } };
-      }, [tasks, projects, users, notes, knowledge, deletedNotes, boardColumns, isLoaded, uid]);
+      }, [tasks, projects, users, notes, knowledge, deletedNotes, boardColumns, focusZones, isLoaded, uid]);
 
       useEffect(() => {
         let interval = null;
@@ -3080,7 +3116,7 @@
                 {activeView === 'sheet' && renderSheet()}
                 {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} onPlan={(taskId, dateStr) => setTasks(tasks.map(t => t.id === taskId ? { ...t, planDate: dateStr } : t))} />}
                 {activeView === 'dedup' && <DuplicateFinder tasks={tasks} setTasks={setTasks} />}
-                {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} boardColumns={boardColumns} onSetStatus={markTaskStatus} onAddTask={addFocusTask} onOpenDetail={setDetailTaskId} />}
+                {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} boardColumns={boardColumns} zones={focusZones} setZones={setFocusZones} onSetStatus={markTaskStatus} onAddTask={addFocusTask} onOpenDetail={setDetailTaskId} />}
                 {activeView === 'done' && <CompletedTasks tasks={tasks} projects={projects} onArchive={(t) => openArchive('task', t)} />}
                 {activeView === 'notes' && renderNotes()}
                 {activeView === 'recycle' && <RecycleBin deletedNotes={deletedNotes} setDeletedNotes={setDeletedNotes} notes={notes} setNotes={setNotes} />}
