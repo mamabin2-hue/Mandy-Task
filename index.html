@@ -1232,8 +1232,9 @@
     };
 
     // 工作台：今日集中 / 暫緩 / 未指定（透過 setTasks 只改 zone 欄位回拋。平行 Agent 產出，整合時已回歸測試）
-    const FocusZones = ({ tasks, setTasks, boardColumns, onSetStatus }) => {
+    const FocusZones = ({ tasks, setTasks, boardColumns, onSetStatus, onAddTask }) => {
       const [q, setQ] = useState('');
+      const [addText, setAddText] = useState('');
       const list = Array.isArray(tasks) ? tasks : [];
       const kw = q.trim().toLowerCase();
       const matchQ = (t) => { if (!kw) return true; const hay = [t && t.text, t && t.category, t && t.assignee, t && t.note].map(x => String(x || '').toLowerCase()).join(' '); return hay.includes(kw); };
@@ -1286,6 +1287,12 @@
       };
       return (
         <div className="w-full animate-in fade-in duration-300">
+          {onAddTask && (
+            <div className="mb-3 relative">
+              <Plus size={18} className="text-indigo-500 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input type="text" value={addText} onChange={(e) => setAddText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && addText.trim()) { onAddTask(addText); setAddText(''); } }} placeholder="在這裡直接新增任務到「今日集中」…（按 Enter 新增）" className="w-full bg-white text-slate-800 text-sm font-bold pl-11 pr-4 py-3 rounded-2xl outline-none focus:ring-2 focus:ring-indigo-300 border border-slate-200 shadow-sm" />
+            </div>
+          )}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 px-1">
             <div className="flex items-start gap-2"><Plus size={16} className="text-indigo-500 mt-0.5 shrink-0" /><p className="text-sm text-slate-600">把今天要專心做的放進「今日集中」，先擱著的放「暫緩」（點卡片上的按鈕移動即可）。</p></div>
             <div className="relative shrink-0">
@@ -1788,6 +1795,14 @@
           setNewTaskInput('');
         }
       };
+
+      // 在工作台直接新增任務 → 放進「今日集中」
+      const addFocusTask = useCallback((text) => {
+        const v = (text || '').trim();
+        if (!v) return;
+        const newTask = { id: Date.now().toString(), text: v, type: 'work', category: '', period: '不指定時段', deadline: '', status: 'todo', timeSpent: 0, logs: [], assignee: '', note: '', zone: 'focus', createdAt: new Date().toISOString() };
+        setTasks(prev => [newTask, ...prev]);
+      }, []);
 
       const updateTask = useCallback((taskId, field, value) => {
         setTasks(prev => prev.map(t => t.id === taskId ? { ...t, [field]: value } : t));
@@ -3153,7 +3168,7 @@
                 {activeView === 'sheet' && renderSheet()}
                 {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} onPlan={(taskId, dateStr) => setTasks(tasks.map(t => t.id === taskId ? { ...t, planDate: dateStr } : t))} />}
                 {activeView === 'dedup' && <DuplicateFinder tasks={tasks} setTasks={setTasks} />}
-                {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} boardColumns={boardColumns} onSetStatus={markTaskStatus} />}
+                {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} boardColumns={boardColumns} onSetStatus={markTaskStatus} onAddTask={addFocusTask} />}
                 {activeView === 'done' && <CompletedTasks tasks={tasks} projects={projects} onArchive={(t) => openArchive('task', t)} />}
                 {activeView === 'notes' && renderNotes()}
                 {activeView === 'recycle' && <RecycleBin deletedNotes={deletedNotes} setDeletedNotes={setDeletedNotes} notes={notes} setNotes={setNotes} />}
