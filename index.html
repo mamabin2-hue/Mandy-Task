@@ -54,7 +54,7 @@
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail } from 'firebase/auth';
-    import { getFirestore, doc, onSnapshot, setDoc } from 'firebase/firestore';
+    import { getFirestore, doc, onSnapshot, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 
     // Firebase 連線設定（apiKey 為網頁版公開金鑰，安全由 Firestore 規則 + 登入控管）
     const firebaseConfig = {
@@ -167,6 +167,15 @@
       { id: 'in-progress', title: '進行中', builtin: true },
       { id: 'done', title: '已完成', builtin: true },
     ];
+    // 把時間戳記格式化成「M/D HH:mm」給還原點清單用
+    const fmtSnapTime = (ts) => {
+      try {
+        const d = new Date(ts);
+        const pad = n => String(n).padStart(2, '0');
+        return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      } catch (e) { return String(ts); }
+    };
+
     const normalizeColumns = (cols) => {
       const arr = Array.isArray(cols) ? cols.filter(c => c && c.id && c.title != null) : [];
       if (!arr.length) return DEFAULT_BOARD_COLUMNS;
@@ -1397,6 +1406,12 @@
       const localJsonRef = useRef(null);     // 目前本地內容快照（給 onSnapshot 判斷「本地是否有未同步變更」，避免 stale closure）
       const shrinkApprovedRef = useRef(false); // 使用者已確認「這次任務/便利貼大幅減少是刻意的」，避免同一編輯段落重複跳確認
       const [syncStatus, setSyncStatus] = useState('idle'); // idle | saving | saved | error
+      const [showRestorePoints, setShowRestorePoints] = useState(false);   // 雲端還原點視窗
+      const [restorePoints, setRestorePoints] = useState([]);
+      const [restorePointsLoading, setRestorePointsLoading] = useState(false);
+      const [restorePointsError, setRestorePointsError] = useState(false);  // 讀還原點清單失敗（要跟「沒有還原點」區分，避免嚇到使用者）
+      const [snapTooBig, setSnapTooBig] = useState(false);                   // 資料量過大 → 自動還原點暫停
+      const lastCloudSnapRef = useRef(0);                                   // 記憶體版節流時間戳（localStorage 不可用時的後備，避免狂寫快照）
 
       // 產生目前本地完整內容（供比對與寫入共用）
       const buildLocalPayload = () => {
@@ -1446,6 +1461,93 @@
         if (snapshotOk) setLastAutoBackup(today);
       }, [isLoaded, uid, autoBackupOn, tasks, notes]);
 
+      // 雲端版本備份（還原點）：資料有變動、且距上次快照≥15分鐘 → 在雲端存一份「時間點快照」，保留最近 24 份。
+      // 目的：把「每天只備份一次」的斷層縮小到 15 分鐘內，壞掉時可還原到最接近的時間點。免綁卡（Firestore 免費額度內）。
+      // 用一份小的索引文件（backups_meta/index）記清單，列表/修剪時只讀索引、不重覆下載每份大快照，省流量。
+      useEffect(() => {
+        if (!isLoaded || !uid || !canWriteRef.current) return;
+        const payload = buildLocalPayload();
+        if ((!payload.tasks || payload.tasks.length === 0) && (!payload.notes || payload.notes.length === 0)) return;
+        const throttleKey = 'mt_last_cloud_snap_' + uid;
+        let lastTs = 0;
+        try { lastTs = parseInt(localStorage.getItem(throttleKey) || '0', 10) || 0; } catch (e) {}
+        lastTs = Math.max(lastTs, lastCloudSnapRef.current);   // localStorage 不可用時用記憶體後備，避免節流失效狂寫
+        const now = Date.now();
+        if (now - lastTs < 15 * 60 * 1000) return;   // 15 分鐘內不重複存
+        const timer = setTimeout(async () => {
+          const prevThrottle = lastTs;
+          try {
+            const snapJson = JSON.stringify(payload);
+            // 大小保護：快照整份塞在單一欄位，接近 Firestore 單文件 1MB 上限就跳過（並提示使用者自動還原點暫停）
+            let bytes = snapJson.length;
+            try { bytes = new Blob([snapJson]).size; } catch (e) {}
+            if (bytes > 950000) { setSnapTooBig(true); return; }
+            setSnapTooBig(false);
+            // 先記下節流時間戳（await 之前，含記憶體後備），避免慢速寫入期間又被觸發、連寫多份大快照
+            lastCloudSnapRef.current = now;
+            try { localStorage.setItem(throttleKey, String(now)); } catch (e) {}
+            const snapId = String(now) + '-' + Math.random().toString(36).slice(2, 5);
+            await setDoc(doc(fbDb, 'users', uid, 'backups', snapId), {
+              ts: now, at: new Date(now).toISOString(),
+              taskCount: (payload.tasks || []).length, noteCount: (payload.notes || []).length,
+              json: snapJson
+            });
+            // 更新索引 + 修剪到 24 份
+            const idxRef = doc(fbDb, 'users', uid, 'backups_meta', 'index');
+            let list = [];
+            try { const s = await getDoc(idxRef); if (s.exists()) list = (s.data().list) || []; } catch (e) {}
+            list = list.filter(x => x && x.id !== snapId);
+            list.push({ id: snapId, ts: now, at: new Date(now).toISOString(), taskCount: (payload.tasks || []).length, noteCount: (payload.notes || []).length });
+            list.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+            const keep = list.slice(0, 24);
+            const drop = list.slice(24);
+            await setDoc(idxRef, { list: keep });
+            for (const old of drop) { try { await deleteDoc(doc(fbDb, 'users', uid, 'backups', old.id)); } catch (e) {} }
+          } catch (e) {
+            // 寫入失敗 → 把節流時間戳退回，讓下次變動能重試，不要因失敗白白空 15 分鐘
+            lastCloudSnapRef.current = prevThrottle;
+            try { localStorage.setItem(throttleKey, String(prevThrottle)); } catch (e2) {}
+          }
+        }, 3000);   // 等連續變動穩定 3 秒再存，避免打字途中頻繁寫入
+        return () => clearTimeout(timer);
+      }, [isLoaded, uid, tasks, notes, projects, knowledge, users, deletedNotes, boardColumns]);
+
+      // 載入雲端還原點清單（開視窗時呼叫）
+      const loadRestorePoints = async () => {
+        if (!uid) return;
+        setRestorePointsLoading(true);
+        setRestorePointsError(false);
+        try {
+          const s = await getDoc(doc(fbDb, 'users', uid, 'backups_meta', 'index'));
+          const list = s.exists() ? ((s.data().list) || []) : [];
+          list.sort((a, b) => (b.ts || 0) - (a.ts || 0));
+          setRestorePoints(list);
+        } catch (e) { setRestorePoints([]); setRestorePointsError(true); }   // 連不上雲端 ≠ 沒有備份，要分開提示
+        setRestorePointsLoading(false);
+      };
+
+      // 還原到某個雲端時間點
+      const restoreFromPoint = async (point) => {
+        if (!uid || !point) return;
+        try {
+          const s = await getDoc(doc(fbDb, 'users', uid, 'backups', point.id));
+          if (!s.exists()) { alert('這個還原點的資料已不在雲端（可能已被較新版本汰換）。'); return; }
+          const data = JSON.parse((s.data().json) || '{}');
+          if (data.catMap) localStorage.setItem('taskflow_catmap', JSON.stringify(data.catMap));
+          if (Array.isArray(data.tasks)) setTasks(data.tasks.map(t => healTaskData(t)));
+          if (Array.isArray(data.projects) && data.projects.length) setProjects(data.projects);
+          if (Array.isArray(data.users)) setUsers([...new Set([...DEFAULT_USERS, ...data.users])]);
+          if (Array.isArray(data.notes)) setNotes(data.notes);
+          if (Array.isArray(data.knowledge)) setKnowledge(data.knowledge);
+          if (Array.isArray(data.deletedNotes)) setDeletedNotes(data.deletedNotes);
+          if (data.boardColumns) setBoardColumns(normalizeColumns(data.boardColumns));
+          // 這是使用者「刻意還原」→ 放行本次寫入，避免驟減防呆又跳確認、被誤按取消而白還原
+          shrinkApprovedRef.current = true;
+          setShowRestorePoints(false);
+          alert('已還原到 ' + fmtSnapTime(point.ts) + '（任務 ' + (point.taskCount || 0) + ' 筆）。\n這份內容會自動同步回雲端。');
+        } catch (e) { alert('還原失敗：' + (e && e.message ? e.message : e)); }
+      };
+
       // 立即把待寫資料寫回雲端（去抖到期、或關頁前 flush 都走這裡）
       flushSaveRef.current = () => {
         if (!uid || !canWriteRef.current) return;              // 尚未成功讀過雲端 → 絕不寫，避免覆蓋真資料
@@ -1472,13 +1574,15 @@
             const nT = Array.isArray(payload.tasks) ? payload.tasks.length : 0;
             const pN = Array.isArray(prev.notes) ? prev.notes.length : 0;
             const nN = Array.isArray(payload.notes) ? payload.notes.length : 0;
-            const bigDrop = (pT >= 10 && nT < pT * 0.5) || (pN >= 10 && nN < pN * 0.5);
+            // 驟減一半以上（原本≥10筆），或「原本有、突然全清空為 0」都要先確認（後者保護小量資料使用者）
+            const bigDrop = (pT >= 10 && nT < pT * 0.5) || (pN >= 10 && nN < pN * 0.5)
+                          || (pT >= 3 && nT === 0) || (pN >= 3 && nN === 0);
             if (bigDrop) {
               const ok = window.confirm(
-                '偵測到資料大幅減少：\n' +
+                '偵測到任務／便利貼數量突然變少：\n' +
                 '　任務 ' + pT + ' → ' + nT + '　便利貼 ' + pN + ' → ' + nN + '\n\n' +
-                '若這是你「刻意刪除」的，按「確定」繼續同步。\n' +
-                '若不是（例如剛還原了舊備份、或畫面異常）→ 按「取消」，然後把網頁「重新整理」即可救回雲端資料，不會遺失。'
+                '如果是你自己刪掉的，按「確定」存檔。\n' +
+                '如果不是（可能是暫時的畫面問題），按「取消」，你的雲端資料都還在；把網頁重新整理就會回來，不會不見。'
               );
               if (!ok) {
                 syncedJsonRef.current = prevSynced;   // 不推進基準、不寫入 → 雲端維持原樣
@@ -2006,6 +2110,49 @@
               <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-6 cursor-zoom-out animate-in fade-in duration-150" onClick={() => setLightbox(null)}>
                 <img src={lightbox} alt="放大檢視" className="max-w-full max-h-full rounded-lg shadow-2xl" onClick={(e) => e.stopPropagation()} />
                 <button onClick={() => setLightbox(null)} className="absolute top-5 right-5 w-10 h-10 bg-white/90 rounded-full flex items-center justify-center text-slate-700 hover:bg-white shadow-lg" title="關閉"><X className="w-5 h-5" /></button>
+              </div>
+            )}
+
+            {showRestorePoints && (
+              <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 animate-in fade-in duration-150" onClick={() => setShowRestorePoints(false)}>
+                <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                  <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                    <div>
+                      <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><RotateCcw className="w-5 h-5 text-emerald-600" /> 雲端還原點</h3>
+                      <p className="text-xs font-bold text-slate-400 mt-0.5">系統每 15 分鐘自動存一份到雲端，大約保留最近幾個小時（24 份）。挑一個時間點還原。</p>
+                    </div>
+                    <button onClick={() => setShowRestorePoints(false)} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100" title="關閉"><X className="w-5 h-5" /></button>
+                  </div>
+                  {snapTooBig && (
+                    <div className="mx-4 mt-3 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-700 leading-relaxed">
+                      注意：目前資料量偏大（可能貼了較多圖片），自動還原點已暫停更新。可到「回收桶」清空、或刪掉部份便利貼貼圖後恢復。
+                    </div>
+                  )}
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {restorePointsLoading ? (
+                      <div className="text-center text-slate-400 font-bold py-10 text-sm">讀取中…</div>
+                    ) : restorePointsError ? (
+                      <div className="text-center text-amber-600 font-bold py-10 text-sm">目前連不上雲端，還原點暫時讀不到<br /><span className="text-xs font-medium text-slate-400">你的備份仍在雲端、不會不見。請關掉這個視窗，過幾秒再打開一次。</span></div>
+                    ) : restorePoints.length === 0 ? (
+                      <div className="text-center text-slate-400 font-bold py-10 text-sm">還沒有雲端還原點<br /><span className="text-xs font-medium">（開始使用後每 15 分鐘會自動存一份，稍後再回來看）</span></div>
+                    ) : (
+                      <div className="flex flex-col gap-2">
+                        {restorePoints.map((p, i) => (
+                          <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-slate-150 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 transition-colors">
+                            <div className="min-w-0">
+                              <div className="font-black text-slate-800 text-sm flex items-center gap-2">{fmtSnapTime(p.ts)}{i === 0 && <span className="text-[10px] font-black text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">最新</span>}</div>
+                              <div className="text-xs font-bold text-slate-400 mt-0.5">任務 {p.taskCount || 0} 筆 · 便利貼 {p.noteCount || 0} 則</div>
+                            </div>
+                            <button onClick={() => { if (window.confirm('確定還原到「' + fmtSnapTime(p.ts) + '」這個時間點嗎？\n（任務 ' + (p.taskCount || 0) + ' 筆）目前畫面上的內容會被這份取代，並自動同步到雲端。')) restoreFromPoint(p); }} className="shrink-0 px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black transition-colors">還原這份</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 text-[11px] font-bold text-slate-400 leading-relaxed">
+                    提示：還原不會刪掉其他還原點。若還原後發現不對，可以挑更接近現在的時間點再還一次；不過「你按下還原前的當下內容」要等下一次自動存檔（約 15 分鐘）後才會成為新的還原點。
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -2656,6 +2803,9 @@
             <div className="p-4 border-t border-slate-800 flex gap-2 bg-slate-950/50">
                <button onClick={handleExport} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="直接下載備份檔，無需確認"><Download className="w-3.5 h-3.5" /> 備份下載</button>
                <button onClick={() => fileInputRef.current.click()} className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-black transition-colors" title="上傳還原"><Upload className="w-3.5 h-3.5" /> 還原資料</button>
+            </div>
+            <div className="px-4 pb-1 bg-slate-950/50">
+               <button onClick={() => { setShowRestorePoints(true); loadRestorePoints(); }} title="還原到雲端上某個時間點的自動存檔（每15分鐘存一份，保留最近24份）" className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-emerald-800/50 hover:bg-emerald-700/60 text-emerald-100 text-xs font-black transition-colors"><RotateCcw className="w-3.5 h-3.5" /> 雲端還原點（自動存檔）</button>
             </div>
             <div className="px-4 pb-1 bg-slate-950/50">
                <input type="file" ref={jiraFileRef} onChange={handleJiraImport} accept=".json" className="hidden" />
