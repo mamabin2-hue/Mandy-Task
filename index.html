@@ -1255,7 +1255,7 @@
     };
 
     // 工作台：今日集中 / 暫緩 / 未指定（透過 setTasks 只改 zone 欄位回拋。平行 Agent 產出，整合時已回歸測試）
-    const FocusZones = ({ tasks, setTasks, boardColumns, zones, setZones, onSetStatus, onAddTask, onOpenDetail }) => {
+    const FocusZones = ({ tasks, setTasks, boardColumns, zones, setZones, onSetStatus, onAddTask, onOpenDetail, notes, onFindInNotes }) => {
       const [q, setQ] = useState('');
       const [addMap, setAddMap] = useState({});   // {zoneId: 輸入字串}
       const zoneList = Array.isArray(zones) && zones.length ? zones : DEFAULT_FOCUS_ZONES;
@@ -1320,10 +1320,25 @@
             <div className="flex items-start gap-2"><Plus size={16} className="text-indigo-500 mt-0.5 shrink-0" /><p className="text-sm text-slate-600">把任務分到各欄；每欄下方可直接新增任務。欄位可自訂（右上「＋新增欄位」）。</p></div>
             <div className="relative shrink-0">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋任務 / 分類 / 人員…" className="w-full sm:w-64 pl-9 pr-8 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300" />
+              <input type="text" value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋任務 / 分類 / 人員 / 便利貼…" className="w-full sm:w-64 pl-9 pr-8 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300" />
               {q && <button onClick={() => setQ('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>}
             </div>
           </div>
+          {kw && (() => {
+            const noteHits = (Array.isArray(notes) ? notes : []).filter(n => n && [n.text, n.tag].map(x => String(x || '').toLowerCase()).join(' ').includes(kw));
+            if (!noteHits.length) return null;
+            return (
+              <div className="mb-4 rounded-2xl border border-yellow-200 bg-yellow-50/60 p-3">
+                <div className="flex items-center gap-2 mb-2 text-yellow-700 text-xs font-black"><PenSquare className="w-3.5 h-3.5" /> 符合的便利貼（{noteHits.length}）— 點一下到隨手筆記查看</div>
+                <div className="flex flex-col gap-1.5">
+                  {noteHits.slice(0, 8).map(n => (
+                    <button key={n.id} onClick={() => onFindInNotes && onFindInNotes(q)} className="text-left text-xs font-bold text-slate-700 bg-white/80 hover:bg-white border border-yellow-200 rounded-xl px-3 py-2 truncate transition-colors" title={String(n.text || '')}>{(n.tag ? '【' + n.tag + '】' : '') + (String(n.text || '(空白便利貼)').replace(/\n/g, ' '))}</button>
+                  ))}
+                  {noteHits.length > 8 && <button onClick={() => onFindInNotes && onFindInNotes(q)} className="text-left text-xs font-bold text-yellow-700 hover:underline px-3">還有 {noteHits.length - 8} 則…到隨手筆記看全部</button>}
+                </div>
+              </div>
+            );
+          })()}
           <div className="flex flex-col lg:flex-row flex-wrap gap-4 items-start">
             {zoneList.map((z) => {
               const items = active.filter((t) => zoneOf(t) === z.id);
@@ -3129,7 +3144,7 @@
                 {activeView === 'sheet' && renderSheet()}
                 {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} onPlan={(taskId, dateStr) => setTasks(tasks.map(t => t.id === taskId ? { ...t, planDate: dateStr } : t))} />}
                 {activeView === 'dedup' && <DuplicateFinder tasks={tasks} setTasks={setTasks} />}
-                {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} boardColumns={boardColumns} zones={focusZones} setZones={setFocusZones} onSetStatus={markTaskStatus} onAddTask={addFocusTask} onOpenDetail={setDetailTaskId} />}
+                {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} boardColumns={boardColumns} zones={focusZones} setZones={setFocusZones} onSetStatus={markTaskStatus} onAddTask={addFocusTask} onOpenDetail={setDetailTaskId} notes={notes} onFindInNotes={(qq) => { setSearchQuery(qq); setActiveView('notes'); }} />}
                 {activeView === 'done' && <CompletedTasks tasks={tasks} projects={projects} onArchive={(t) => openArchive('task', t)} />}
                 {activeView === 'notes' && renderNotes()}
                 {activeView === 'recycle' && <RecycleBin deletedNotes={deletedNotes} setDeletedNotes={setDeletedNotes} notes={notes} setNotes={setNotes} />}
