@@ -1232,7 +1232,7 @@
     };
 
     // 工作台：今日集中 / 暫緩 / 未指定（透過 setTasks 只改 zone 欄位回拋。平行 Agent 產出，整合時已回歸測試）
-    const FocusZones = ({ tasks, setTasks, boardColumns, onSetStatus, onAddTask }) => {
+    const FocusZones = ({ tasks, setTasks, boardColumns, onSetStatus, onAddTask, onOpenDetail }) => {
       const [q, setQ] = useState('');
       const [addText, setAddText] = useState('');
       const list = Array.isArray(tasks) ? tasks : [];
@@ -1253,13 +1253,14 @@
         const text = task.text || '(未命名任務)'; const category = task.category || ''; const deadline = task.deadline ? fmtDeadline(task.deadline) : '';
         return (
           <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex flex-col gap-3">
-            <p className="text-sm font-medium text-slate-800 break-words leading-relaxed">{text}</p>
+            <p onClick={() => onOpenDetail && onOpenDetail(task.id)} title="點一下打開完整內容作業（備註、計時、子任務、連結…）" className={'text-sm font-medium text-slate-800 break-words leading-relaxed' + (onOpenDetail ? ' cursor-pointer hover:text-indigo-600' : '')}>{text}</p>
             {(category || deadline) && (
               <div className="flex flex-wrap items-center gap-2 text-xs">
                 {category && (<span className="px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-100">{category}</span>)}
                 {deadline && (<span className="inline-flex items-center gap-1 text-slate-500"><Clock size={12} />{deadline}</span>)}
               </div>
             )}
+            {onOpenDetail && (<button type="button" onClick={() => onOpenDetail(task.id)} className="self-start text-xs font-bold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1"><AlignLeft size={12} />打開內容作業</button>)}
             <div className="flex flex-wrap items-center gap-2 pt-1">
               {zone !== 'focus' && (<button type="button" onClick={() => moveTo(task.id, 'focus')} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"><Zap size={12} />集中</button>)}
               {zone !== 'hold' && (<button type="button" onClick={() => moveTo(task.id, 'hold')} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors"><PauseCircle size={12} />暫緩</button>)}
@@ -1362,6 +1363,7 @@
       const [linkPickerFor, setLinkPickerFor] = useState(null);   // 正在為哪個任務挑選連結對象（存 task 物件）
       const [linkPickerQ, setLinkPickerQ] = useState('');
       const [focusTaskId, setFocusTaskId] = useState(null);       // 點連結任務要跳去 highlight 的任務 id
+      const [detailTaskId, setDetailTaskId] = useState(null);     // 點任務跳出完整卡片視窗直接作業的任務 id
       const [sheetSort, setSheetSort] = useState({ key: 'createdAt', dir: 'desc' }); // 任務總表排序
       const [sheetFilters, setSheetFilters] = useState({ status: [], category: [], period: [], assignee: [] }); // 任務總表 Excel 式欄位篩選（空=全部）
       const [openFilter, setOpenFilter] = useState(null); // 目前展開的篩選欄
@@ -2334,96 +2336,6 @@
               </div>
             )}
 
-            {showRestorePoints && (
-              <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 animate-in fade-in duration-150" onClick={() => setShowRestorePoints(false)}>
-                <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-                  <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                    <div>
-                      <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><RotateCcw className="w-5 h-5 text-emerald-600" /> 雲端還原點</h3>
-                      <p className="text-xs font-bold text-slate-400 mt-0.5">系統每 15 分鐘自動存一份到雲端，大約保留最近幾個小時（24 份）。挑一個時間點還原。</p>
-                    </div>
-                    <button onClick={() => setShowRestorePoints(false)} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100" title="關閉"><X className="w-5 h-5" /></button>
-                  </div>
-                  {snapTooBig && (
-                    <div className="mx-4 mt-3 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-700 leading-relaxed">
-                      注意：目前資料量偏大（可能貼了較多圖片），自動還原點已暫停更新。可到「回收桶」清空、或刪掉部份便利貼貼圖後恢復。
-                    </div>
-                  )}
-                  <div className="flex-1 overflow-y-auto p-4">
-                    {restorePointsLoading ? (
-                      <div className="text-center text-slate-400 font-bold py-10 text-sm">讀取中…</div>
-                    ) : restorePointsError ? (
-                      <div className="text-center text-amber-600 font-bold py-10 text-sm">目前連不上雲端，還原點暫時讀不到<br /><span className="text-xs font-medium text-slate-400">你的備份仍在雲端、不會不見。請關掉這個視窗，過幾秒再打開一次。</span></div>
-                    ) : restorePoints.length === 0 ? (
-                      <div className="text-center text-slate-400 font-bold py-10 text-sm">還沒有雲端還原點<br /><span className="text-xs font-medium">（開始使用後每 15 分鐘會自動存一份，稍後再回來看）</span></div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        {restorePoints.map((p, i) => (
-                          <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-slate-150 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 transition-colors">
-                            <div className="min-w-0">
-                              <div className="font-black text-slate-800 text-sm flex items-center gap-2">{fmtSnapTime(p.ts)}{i === 0 && <span className="text-[10px] font-black text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">最新</span>}</div>
-                              <div className="text-xs font-bold text-slate-400 mt-0.5">任務 {p.taskCount || 0} 筆 · 便利貼 {p.noteCount || 0} 則</div>
-                            </div>
-                            <button onClick={() => { if (window.confirm('確定還原到「' + fmtSnapTime(p.ts) + '」這個時間點嗎？\n（任務 ' + (p.taskCount || 0) + ' 筆）目前畫面上的內容會被這份取代，並自動同步到雲端。')) restoreFromPoint(p); }} className="shrink-0 px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black transition-colors">還原這份</button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 text-[11px] font-bold text-slate-400 leading-relaxed">
-                    提示：還原不會刪掉其他還原點。若還原後發現不對，可以挑更接近現在的時間點再還一次；不過「你按下還原前的當下內容」要等下一次自動存檔（約 15 分鐘）後才會成為新的還原點。
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {linkPickerFor && (() => {
-              const self = linkPickerFor;
-              const already = new Set([self.id, ...((self.linkedIds) || [])]);
-              const kw = linkPickerQ.trim().toLowerCase();
-              const candidates = (Array.isArray(tasks) ? tasks : [])
-                .filter(t => t && !already.has(t.id))
-                .filter(t => { if (!kw) return true; const hay = [t.text, t.category, t.assignee].map(x => String(x || '').toLowerCase()).join(' '); return hay.includes(kw); })
-                .slice(0, 200);
-              return (
-                <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 animate-in fade-in duration-150" onClick={() => setLinkPickerFor(null)}>
-                  <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-                    <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-                      <div className="min-w-0">
-                        <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><ArrowRightCircle className="w-5 h-5 text-indigo-600" /> 連結相關任務</h3>
-                        <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">為「{self.text || '(未命名)'}」加入相關任務（可多個）</p>
-                      </div>
-                      <button onClick={() => setLinkPickerFor(null)} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 shrink-0" title="關閉"><X className="w-5 h-5" /></button>
-                    </div>
-                    <div className="px-4 pt-3">
-                      <div className="relative">
-                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                        <input type="text" value={linkPickerQ} onChange={(e) => setLinkPickerQ(e.target.value)} autoFocus placeholder="搜尋任務 / 分類 / 人員…" className="w-full pl-9 pr-8 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200" />
-                        {linkPickerQ && <button onClick={() => setLinkPickerQ('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>}
-                      </div>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-4">
-                      {candidates.length === 0 ? (
-                        <div className="text-center text-slate-400 font-bold py-10 text-sm">找不到可連結的任務</div>
-                      ) : (
-                        <div className="flex flex-col gap-1.5">
-                          {candidates.map(t => (
-                            <button key={t.id} onClick={() => { linkTasks(self.id, t.id); setLinkPickerFor(prev => prev ? { ...prev, linkedIds: [...((prev.linkedIds) || []), t.id] } : prev); }} className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl border border-slate-150 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 transition-colors text-left">
-                              <div className="min-w-0">
-                                <div className="font-bold text-slate-800 text-sm truncate">{t.text || '(未命名)'}</div>
-                                <div className="text-xs font-bold text-slate-400 mt-0.5 truncate">{[t.category, statusTitle ? statusTitle(t.status || 'todo') : ''].filter(Boolean).join(' · ')}</div>
-                              </div>
-                              <span className="shrink-0 text-xs font-black text-indigo-600">+ 連結</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 text-[11px] font-bold text-slate-400">點任務即可連結；連結是雙向的，兩邊都看得到彼此。完成後按右上角關閉。</div>
-                  </div>
-                </div>
-              );
-            })()}
           </div>
         );
       };
@@ -3168,7 +3080,7 @@
                 {activeView === 'sheet' && renderSheet()}
                 {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} onPlan={(taskId, dateStr) => setTasks(tasks.map(t => t.id === taskId ? { ...t, planDate: dateStr } : t))} />}
                 {activeView === 'dedup' && <DuplicateFinder tasks={tasks} setTasks={setTasks} />}
-                {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} boardColumns={boardColumns} onSetStatus={markTaskStatus} onAddTask={addFocusTask} />}
+                {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} boardColumns={boardColumns} onSetStatus={markTaskStatus} onAddTask={addFocusTask} onOpenDetail={setDetailTaskId} />}
                 {activeView === 'done' && <CompletedTasks tasks={tasks} projects={projects} onArchive={(t) => openArchive('task', t)} />}
                 {activeView === 'notes' && renderNotes()}
                 {activeView === 'recycle' && <RecycleBin deletedNotes={deletedNotes} setDeletedNotes={setDeletedNotes} notes={notes} setNotes={setNotes} />}
@@ -3180,6 +3092,114 @@
                 {activeView === 'guide' && renderGuide()}
              </div>
           </div>
+
+          {showRestorePoints && (
+            <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 animate-in fade-in duration-150" onClick={() => setShowRestorePoints(false)}>
+              <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><RotateCcw className="w-5 h-5 text-emerald-600" /> 雲端還原點</h3>
+                    <p className="text-xs font-bold text-slate-400 mt-0.5">系統每 15 分鐘自動存一份到雲端，大約保留最近幾個小時（24 份）。挑一個時間點還原。</p>
+                  </div>
+                  <button onClick={() => setShowRestorePoints(false)} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100" title="關閉"><X className="w-5 h-5" /></button>
+                </div>
+                {snapTooBig && (
+                  <div className="mx-4 mt-3 px-3 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[11px] font-bold text-amber-700 leading-relaxed">
+                    注意：目前資料量偏大（可能貼了較多圖片），自動還原點已暫停更新。可到「回收桶」清空、或刪掉部份便利貼貼圖後恢復。
+                  </div>
+                )}
+                <div className="flex-1 overflow-y-auto p-4">
+                  {restorePointsLoading ? (
+                    <div className="text-center text-slate-400 font-bold py-10 text-sm">讀取中…</div>
+                  ) : restorePointsError ? (
+                    <div className="text-center text-amber-600 font-bold py-10 text-sm">目前連不上雲端，還原點暫時讀不到<br /><span className="text-xs font-medium text-slate-400">你的備份仍在雲端、不會不見。請關掉這個視窗，過幾秒再打開一次。</span></div>
+                  ) : restorePoints.length === 0 ? (
+                    <div className="text-center text-slate-400 font-bold py-10 text-sm">還沒有雲端還原點<br /><span className="text-xs font-medium">（開始使用後每 15 分鐘會自動存一份，稍後再回來看）</span></div>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {restorePoints.map((p, i) => (
+                        <div key={p.id} className="flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-slate-150 bg-slate-50 hover:bg-emerald-50 hover:border-emerald-200 transition-colors">
+                          <div className="min-w-0">
+                            <div className="font-black text-slate-800 text-sm flex items-center gap-2">{fmtSnapTime(p.ts)}{i === 0 && <span className="text-[10px] font-black text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">最新</span>}</div>
+                            <div className="text-xs font-bold text-slate-400 mt-0.5">任務 {p.taskCount || 0} 筆 · 便利貼 {p.noteCount || 0} 則</div>
+                          </div>
+                          <button onClick={() => { if (window.confirm('確定還原到「' + fmtSnapTime(p.ts) + '」這個時間點嗎？\n（任務 ' + (p.taskCount || 0) + ' 筆）目前畫面上的內容會被這份取代，並自動同步到雲端。')) restoreFromPoint(p); }} className="shrink-0 px-4 py-2 rounded-full bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black transition-colors">還原這份</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 text-[11px] font-bold text-slate-400 leading-relaxed">
+                  提示：還原不會刪掉其他還原點。若還原後發現不對，可以挑更接近現在的時間點再還一次；不過「你按下還原前的當下內容」要等下一次自動存檔（約 15 分鐘）後才會成為新的還原點。
+                </div>
+              </div>
+            </div>
+          )}
+
+          {linkPickerFor && (() => {
+            const self = linkPickerFor;
+            const already = new Set([self.id, ...((self.linkedIds) || [])]);
+            const kw = linkPickerQ.trim().toLowerCase();
+            const candidates = (Array.isArray(tasks) ? tasks : [])
+              .filter(t => t && !already.has(t.id))
+              .filter(t => { if (!kw) return true; const hay = [t.text, t.category, t.assignee].map(x => String(x || '').toLowerCase()).join(' '); return hay.includes(kw); })
+              .slice(0, 200);
+            return (
+              <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4 animate-in fade-in duration-150" onClick={() => setLinkPickerFor(null)}>
+                <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+                  <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                    <div className="min-w-0">
+                      <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><ArrowRightCircle className="w-5 h-5 text-indigo-600" /> 連結相關任務</h3>
+                      <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">為「{self.text || '(未命名)'}」加入相關任務（可多個）</p>
+                    </div>
+                    <button onClick={() => setLinkPickerFor(null)} className="w-8 h-8 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-100 shrink-0" title="關閉"><X className="w-5 h-5" /></button>
+                  </div>
+                  <div className="px-4 pt-3">
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input type="text" value={linkPickerQ} onChange={(e) => setLinkPickerQ(e.target.value)} autoFocus placeholder="搜尋任務 / 分類 / 人員…" className="w-full pl-9 pr-8 py-2 rounded-2xl bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200" />
+                      {linkPickerQ && <button onClick={() => setLinkPickerQ('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>}
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4">
+                    {candidates.length === 0 ? (
+                      <div className="text-center text-slate-400 font-bold py-10 text-sm">找不到可連結的任務</div>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        {candidates.map(t => (
+                          <button key={t.id} onClick={() => { linkTasks(self.id, t.id); setLinkPickerFor(prev => prev ? { ...prev, linkedIds: [...((prev.linkedIds) || []), t.id] } : prev); }} className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-2xl border border-slate-150 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 transition-colors text-left">
+                            <div className="min-w-0">
+                              <div className="font-bold text-slate-800 text-sm truncate">{t.text || '(未命名)'}</div>
+                              <div className="text-xs font-bold text-slate-400 mt-0.5 truncate">{[t.category, statusTitle ? statusTitle(t.status || 'todo') : ''].filter(Boolean).join(' · ')}</div>
+                            </div>
+                            <span className="shrink-0 text-xs font-black text-indigo-600">+ 連結</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="px-6 py-3 border-t border-slate-100 bg-slate-50 text-[11px] font-bold text-slate-400">點任務即可連結；連結是雙向的，兩邊都看得到彼此。完成後按右上角關閉。</div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {detailTaskId && (() => {
+            const dt = (Array.isArray(tasks) ? tasks : []).find(t => t && t.id === detailTaskId);
+            if (!dt) return null;
+            const linked = (dt.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }));
+            return (
+              <div className="fixed inset-0 z-[100] bg-black/50 flex items-start justify-center p-4 overflow-y-auto animate-in fade-in duration-150" onClick={() => setDetailTaskId(null)}>
+                <div className="w-full max-w-xl my-6" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-white font-black text-sm drop-shadow">任務內容（直接作業，改完自動同步）</span>
+                    <button onClick={() => setDetailTaskId(null)} className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center text-slate-700 hover:bg-white shadow shrink-0" title="關閉"><X className="w-5 h-5" /></button>
+                  </div>
+                  <TaskCard task={dt} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={false} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} linkedTasks={linked} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={(id) => { setDetailTaskId(null); jumpToTask(id); }} onUnlink={unlinkTasks} statusTitle={statusTitle} />
+                </div>
+              </div>
+            );
+          })()}
         </div>
       );
     }
