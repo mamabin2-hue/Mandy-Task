@@ -3061,7 +3061,7 @@
             </div>
             <div className="px-4 pb-1 bg-slate-950/50">
                <input type="file" ref={jiraFileRef} onChange={handleJiraImport} accept=".json" className="hidden" />
-               <button onClick={async () => { try { await setDoc(doc(fbDb, 'users', uid, 'control', 'syncRequest'), { ts: Date.now() }); setJiraSyncMsg('已送出，約 1 分鐘內同步'); setTimeout(() => setJiraSyncMsg(''), 8000); } catch (e) { setJiraSyncMsg('送出失敗，稍後再試'); } }} title="立刻請求同步 Jira（雙向），約 1 分鐘內完成，不用等排程" className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-sky-700/60 hover:bg-sky-600/70 text-sky-100 text-xs font-black transition-colors"><Clock className="w-3.5 h-3.5" /> {jiraSyncMsg || '⚡ 現在同步 Jira'}</button>
+               <button onClick={async () => { try { setJiraSyncMsg('存檔中…'); try { if (flushSaveRef.current) flushSaveRef.current(); } catch (e) {} await new Promise(r => setTimeout(r, 1200)); await setDoc(doc(fbDb, 'users', uid, 'control', 'syncRequest'), { ts: Date.now() }); setJiraSyncMsg('已送出，約 1 分鐘內同步'); setTimeout(() => setJiraSyncMsg(''), 8000); } catch (e) { setJiraSyncMsg('送出失敗，稍後再試'); } }} title="立刻請求同步 Jira（雙向），約 1 分鐘內完成，不用等排程" className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-sky-700/60 hover:bg-sky-600/70 text-sky-100 text-xs font-black transition-colors"><Clock className="w-3.5 h-3.5" /> {jiraSyncMsg || '⚡ 現在同步 Jira'}</button>
             </div>
             <div className="px-4 pb-2 flex items-center justify-between gap-2 bg-slate-950/50">
                <div className="flex flex-col">
