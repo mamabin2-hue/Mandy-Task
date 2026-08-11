@@ -219,8 +219,9 @@
       return result;
     };
 
-    // 貼圖壓縮：讀圖→畫到 canvas 縮到 maxDim→輸出小 JPEG dataURL（控制雲端單檔大小）
-    const compressImage = (fileOrBlob, maxDim = 320, quality = 0.55) => new Promise((resolve, reject) => {
+    // 貼圖壓縮：盡量保留可讀解析度（最長邊到 maxDim），但把輸出大小控制在 maxLen 以內，
+    // 以免撐爆 Firestore 單文件 1MB（影響雲端同步）。太大就自動降畫質→再降尺寸，直到符合預算。
+    const compressImage = (fileOrBlob, maxDim = 1500, quality = 0.75, maxLen = 600 * 1024) => new Promise((resolve, reject) => {
       try {
         const reader = new FileReader();
         reader.onerror = () => reject(new Error('讀取圖片失敗'));
@@ -228,13 +229,26 @@
           const img = new Image();
           img.onerror = () => reject(new Error('解析圖片失敗'));
           img.onload = () => {
-            let w = img.width, h = img.height;
-            if (w >= h && w > maxDim) { h = Math.round(h * maxDim / w); w = maxDim; }
-            else if (h > w && h > maxDim) { w = Math.round(w * maxDim / h); h = maxDim; }
-            const canvas = document.createElement('canvas');
-            canvas.width = w; canvas.height = h;
-            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-            resolve(canvas.toDataURL('image/jpeg', quality));
+            const encode = (dim, q) => {
+              let w = img.width, h = img.height;
+              if (w >= h && w > dim) { h = Math.round(h * dim / w); w = dim; }
+              else if (h > w && h > dim) { w = Math.round(w * dim / h); h = dim; }
+              const canvas = document.createElement('canvas');
+              canvas.width = w; canvas.height = h;
+              canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+              return canvas.toDataURL('image/jpeg', q);
+            };
+            let dim = maxDim, q = quality;
+            let out = encode(dim, q);
+            let guard = 0;
+            // 超過大小預算 → 先降畫質(到 0.5)，再降尺寸(每次 85%)，最多試 12 次
+            while (out.length > maxLen && guard < 12) {
+              if (q > 0.5) q = Math.round((q - 0.08) * 100) / 100;
+              else dim = Math.round(dim * 0.85);
+              out = encode(dim, q);
+              guard++;
+            }
+            resolve(out);
           };
           img.src = e.target.result;
         };
