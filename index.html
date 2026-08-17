@@ -766,7 +766,7 @@
     };
 
     // 每日/週計劃（唯讀視圖，內部 UI 狀態，不寫外部資料；平行 Agent 產出，整合時已回歸測試）
-    const WeekPlanner = ({ tasks, projects, onOpenDay, onPlan }) => {
+    const WeekPlanner = ({ tasks, projects, onOpenDay, onPlan, onOpenDetail }) => {
       const [mode, setMode] = React.useState('week');
       const [weekOffset, setWeekOffset] = React.useState(0);
       const [dayOffset, setDayOffset] = React.useState(0);
@@ -815,7 +815,7 @@
         const worked = dayK && workedKeys[t.id] && workedKeys[t.id].has(dayK);
         const wmins = worked ? Math.round(minsOnDay(t, dayK)) : 0;
         return (
-        <div draggable onDragStart={(e) => e.dataTransfer.setData('planTaskId', t.id)} title={worked ? '這天有投入時間，自動顯示（也可拖到其他天）' : '可拖曳到其他天排程'} className={'flex items-start gap-1.5 px-2 py-1.5 rounded-xl border transition-colors cursor-grab active:cursor-grabbing ' + (worked ? 'bg-emerald-50/70 border-emerald-100 hover:bg-emerald-50' : 'bg-slate-50 border-slate-100 hover:bg-indigo-50')}>
+        <div draggable onDragStart={(e) => e.dataTransfer.setData('planTaskId', t.id)} onClick={() => onOpenDetail && onOpenDetail(t.id)} title={(worked ? '這天有投入時間，自動顯示。' : '') + '點一下看任務內容；拖曳可排到其他天'} className={'flex items-start gap-1.5 px-2 py-1.5 rounded-xl border transition-colors cursor-pointer ' + (worked ? 'bg-emerald-50/70 border-emerald-100 hover:bg-emerald-50' : 'bg-slate-50 border-slate-100 hover:bg-indigo-50')}>
           <span className="mt-1 w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorOf(t.category) }} />
           <div className="min-w-0 flex-1">
             <div className="text-xs font-medium text-slate-700 truncate">{t.text || '(未命名任務)'}</div>
@@ -3182,7 +3182,7 @@
              <div className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-8 w-full relative">
                 {activeView === 'board' && renderBoard()}
                 {activeView === 'sheet' && renderSheet()}
-                {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} onPlan={(taskId, dateStr) => setTasks(tasks.map(t => t.id === taskId ? { ...t, planDate: dateStr } : t))} />}
+                {activeView === 'planner' && <WeekPlanner tasks={tasks} projects={projects} onOpenDetail={setDetailTaskId} onPlan={(taskId, dateStr) => setTasks(tasks.map(t => t.id === taskId ? { ...t, planDate: dateStr } : t))} />}
                 {activeView === 'dedup' && <DuplicateFinder tasks={tasks} setTasks={setTasks} />}
                 {activeView === 'focus' && <FocusZones tasks={tasks} setTasks={setTasks} boardColumns={boardColumns} zones={focusZones} setZones={setFocusZones} onSetStatus={markTaskStatus} onAddTask={addFocusTask} onOpenDetail={setDetailTaskId} notes={notes} search={searchQuery} onFindInNotes={(qq) => { setSearchQuery(qq); setActiveView('notes'); }} />}
                 {activeView === 'done' && <CompletedTasks tasks={tasks} projects={projects} onArchive={(t) => openArchive('task', t)} />}
