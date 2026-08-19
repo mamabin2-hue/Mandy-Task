@@ -1458,6 +1458,7 @@
     function TaskManager({ uid, userEmail }) {
       const [activeView, setActiveView] = useState('board');
       const [statsTab, setStatsTab] = useState('stats');   // 統計報表頁內的分頁：stats / ceo
+      const [notesTab, setNotesTab] = useState('active');   // 隨手筆記分頁：active(目前) / stashed(暫存)
       const [searchQuery, setSearchQuery] = useState('');
       const [linkPickerFor, setLinkPickerFor] = useState(null);   // 正在為哪個任務挑選連結對象（存 task 物件）
       const [linkPickerQ, setLinkPickerQ] = useState('');
@@ -2375,11 +2376,20 @@
                   </div>
                </div>
             </div>
+            <div className="flex items-center gap-2 border-b border-slate-200">
+              <button onClick={() => setNotesTab('active')} className={`px-4 py-2.5 text-sm font-black transition-colors border-b-2 -mb-px ${notesTab === 'active' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>目前（{notes.filter(n => n && !n.stashed).length}）</button>
+              <button onClick={() => setNotesTab('stashed')} className={`px-4 py-2.5 text-sm font-black transition-colors border-b-2 -mb-px ${notesTab === 'stashed' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>暫存（{notes.filter(n => n && n.stashed).length}）</button>
+            </div>
             {searching && notes.filter(n => { const q = searchQuery.trim().toLowerCase(); return [n.text, n.tag].filter(Boolean).join(' ').toLowerCase().includes(q); }).length === 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 text-sm font-bold text-amber-800">找不到符合「{searchQuery}」的便利貼。</div>
             )}
+            {!searching && notes.filter(n => n && (notesTab === 'stashed' ? n.stashed : !n.stashed)).length === 0 && (
+              <div className="text-center text-slate-400 font-bold py-12 text-sm">{notesTab === 'stashed' ? '暫存區是空的。在便利貼右上角按「暫存」圖示，就會收到這裡。' : '目前沒有便利貼，用上面的框新增。'}</div>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
                {notes.map((note, index) => {
+                  // 分頁：目前只顯示未暫存、暫存只顯示已暫存（用 return null 保留原索引，拖曳排序不受影響）
+                  if (notesTab === 'stashed' ? !note.stashed : !!note.stashed) return null;
                   // 搜尋中：不符關鍵字的便利貼隱藏（用 return null 保留原索引，拖曳排序不受影響）
                   if (searching) { const q = searchQuery.trim().toLowerCase(); const hay = [note.text, note.tag].filter(Boolean).join(' ').toLowerCase(); if (!hay.includes(q)) return null; }
                   return (
@@ -2426,6 +2436,7 @@
                         <button onClick={() => setNotes(notes.map(n => n.id === note.id ? { ...n, mailOutlook: !n.mailOutlook } : n))} title={note.mailOutlook ? '已標記：電腦上執行「Outlook草稿」程式時會用桌面 Outlook 開這則草稿（再點取消）' : '標記用桌面 Outlook 開草稿（執行 Outlook草稿程式時會開現場 Outlook，不用雲端版）'} className={`w-7 h-7 rounded-full flex items-center justify-center shadow-sm ${note.mailOutlook ? 'bg-indigo-600 text-white' : 'bg-white/60 hover:bg-indigo-500 hover:text-white text-slate-500'}`}><Mail className="w-3.5 h-3.5" /></button>
                         <button onClick={() => { if (!(note.text || '').trim()) return; if (window.confirm('把這則筆記送到匯報清單（會建立一則任務' + (note.tag ? '，匯報給 ' + note.tag : '') + '）？')) { setTasks([healTaskData({ id: Date.now().toString(), text: note.text, assignee: note.tag || '', status: 'todo', category: '', period: '不指定時段', createdAt: new Date().toISOString() }), ...tasks]); } }} title="送到匯報清單（建立任務）" className="w-7 h-7 bg-white/60 hover:bg-emerald-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Send className="w-3.5 h-3.5" /></button>
                         <button onClick={() => openArchive('note', note)} title="歸檔到知識庫（自動建議分類）" className="w-7 h-7 bg-white/60 hover:bg-amber-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><BookOpen className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => setNotes(notes.map(n => n.id === note.id ? { ...n, stashed: !n.stashed } : n))} title={note.stashed ? '取回到「目前」' : '收到「暫存」（讓目前畫面清爽）'} className="w-7 h-7 bg-white/60 hover:bg-slate-700 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm">{note.stashed ? <RotateCcw className="w-3.5 h-3.5" /> : <PauseCircle className="w-3.5 h-3.5" />}</button>
                         <button onClick={() => { setNotes(notes.filter(n => n.id !== note.id)); setDeletedNotes([{ ...note, deletedAt: new Date().toISOString() }, ...deletedNotes]); }} title="刪除（可到回收桶復原）" className="w-7 h-7 bg-white/60 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Trash2 className="w-3.5 h-3.5" /></button>
                      </div>
                   </div>
