@@ -2362,6 +2362,8 @@
         const addSheet = () => { const name = (window.prompt('新增便利貼分頁名稱（例如：薪資、合約、待跟進…）：', '') || '').trim(); if (!name) return; setNoteSheets(normalizeNoteSheets([...sheetList.filter(s => s.id !== 'stashed'), { id: 'ns_' + Date.now().toString(36), title: name, builtin: false }, { id: 'stashed', title: '暫存', builtin: true }])); };
         const renameSheet = (sid) => { const cur = sheetList.find(s => s.id === sid); const name = (window.prompt('分頁名稱：', cur ? cur.title : '') || '').trim(); if (!name) return; setNoteSheets(sheetList.map(s => s.id === sid ? { ...s, title: name } : s)); };
         const deleteSheet = (sid) => { const cur = sheetList.find(s => s.id === sid); if (!cur) return; if (!window.confirm('刪除分頁「' + cur.title + '」？\n裡面的便利貼不會不見，會移回「目前」。')) return; setNotes(notes.map(n => (n && sheetOf(n) === sid) ? { ...n, sheet: 'active', stashed: false } : n)); setNoteSheets(sheetList.filter(s => s.id !== sid)); if (notesTab === sid) setNotesTab('active'); };
+        // 調整自訂分頁左右順序（只能在自訂分頁之間移動；「目前」固定第一、「暫存」固定最後）
+        const moveSheet = (sid, dir) => { const arr = [...sheetList]; const i = arr.findIndex(s => s.id === sid); const j = i + dir; if (i < 0 || j < 0 || j >= arr.length) return; if (arr[i].builtin || arr[j].builtin) return; const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp; setNoteSheets(normalizeNoteSheets(arr)); };
         return (
           <div className="w-full space-y-6 animate-in fade-in duration-300 pb-10">
             <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col gap-4">
@@ -2412,6 +2414,8 @@
                   <button onClick={() => setNotesTab(s.id)} className={`px-3 py-2.5 text-sm font-black transition-colors ${curTab === s.id ? 'text-indigo-600' : 'text-slate-400 hover:text-slate-600'}`}>{s.title}（{notes.filter(n => n && sheetOf(n) === s.id).length}）</button>
                   {!s.builtin && curTab === s.id && (
                     <span className="flex items-center gap-0.5 pr-1">
+                      <button onClick={() => moveSheet(s.id, -1)} title="往左移" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-slate-100 font-black">◀</button>
+                      <button onClick={() => moveSheet(s.id, 1)} title="往右移" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-slate-100 font-black">▶</button>
                       <button onClick={() => renameSheet(s.id)} title="分頁改名" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-slate-100"><Edit2 className="w-3.5 h-3.5" /></button>
                       <button onClick={() => deleteSheet(s.id)} title="刪除分頁（便利貼移回目前）" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-slate-100"><Trash2 className="w-3.5 h-3.5" /></button>
                     </span>
