@@ -274,7 +274,7 @@
     });
 
     // 任務卡片元件
-    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, compact, onArchive, boardColumns, moveTaskInColumn, moveTaskToEdge, linkedTasks, onOpenLinkPicker, onJumpTask, onUnlink, statusTitle }) => {
+    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, updateLogNote, compact, onArchive, boardColumns, moveTaskInColumn, moveTaskToEdge, linkedTasks, onOpenLinkPicker, onJumpTask, onUnlink, statusTitle }) => {
       const isRunning = activeTimer === task.id;
       const projectInfo = projects.find(p => p.name === task.category);
       const projectColor = projectInfo?.color || '#cbd5e1';
@@ -505,6 +505,9 @@
                        <span className="truncate" title={log.note || ''}>{dateLabel} {log.manual ? '(補)' : ''}{log.note ? ` · ${log.note}` : ''}</span>
                        <div className="flex items-center gap-2">
                          <span className={isCurrent ? 'text-indigo-600 font-black' : 'text-indigo-500'}>+{dur}m</span>
+                         {!isCurrent && updateLogNote && (
+                            <button onClick={(e) => { e.stopPropagation(); const v = window.prompt('這段時間做了什麼？（備註，可留空清除）', log.note || ''); if (v !== null) updateLogNote(task.id, log.id, v.trim()); }} onDragStart={stopDragAndDrop} className="w-5 h-5 rounded-full text-slate-400 opacity-0 group-hover/log:opacity-100 hover:bg-indigo-100 hover:text-indigo-600 flex items-center justify-center transition-all" title="補／改這筆的備註"><Edit2 className="w-3 h-3" /></button>
+                         )}
                          {!isCurrent && (
                             <button onClick={(e) => { e.stopPropagation(); deleteLog(task.id, log.id); }} onDragStart={stopDragAndDrop} className="w-5 h-5 rounded-full text-slate-400 opacity-0 group-hover/log:opacity-100 hover:bg-red-100 hover:text-red-500 flex items-center justify-center transition-all" title="刪除此紀錄"><Trash2 className="w-3 h-3" /></button>
                          )}
@@ -2149,6 +2152,11 @@
         }));
       }, []);
 
+      // 補/改「已登記時數」的備註（點該筆時數的鉛筆，事後補上這段時間做了什麼）
+      const updateLogNote = useCallback((taskId, logId, note) => {
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, logs: (t.logs || []).map(l => l.id === logId ? { ...l, note } : l) } : t));
+      }, []);
+
       const handleExport = () => {
         let catMap = {};
         try { catMap = JSON.parse(localStorage.getItem('taskflow_catmap') || '{}'); } catch (e) {}
@@ -2329,7 +2337,7 @@
                   <div className="flex flex-col gap-0 min-h-[200px]">
                      {data.map(task => (
                         <div key={task.id} id={'taskcard-' + task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)} onDragOver={e=>{ e.preventDefault(); }} onDrop={(e)=>{ e.preventDefault(); e.stopPropagation(); const draggedId = e.dataTransfer.getData('taskId'); if(draggedId) moveTaskRelative(draggedId, task.id, col.id); }}>
-                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} moveTaskToEdge={moveTaskToEdge} linkedTasks={(task.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }))} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={jumpToTask} onUnlink={unlinkTasks} statusTitle={statusTitle} />
+                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} moveTaskToEdge={moveTaskToEdge} linkedTasks={(task.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }))} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={jumpToTask} onUnlink={unlinkTasks} statusTitle={statusTitle} />
                         </div>
                      ))}
                      {data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">{searching ? '查無符合' : '無任務或拖曳至此'}</div>}
@@ -2527,7 +2535,7 @@
                  <div key={user} className="flex flex-col gap-4">
                     <h3 className="text-lg font-black text-purple-800 flex items-center gap-2 border-b border-purple-100 pb-2"><User className="w-5 h-5" /> 匯報給：{displayName} <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded-full">{userTasks.length + userNotes.length}</span></h3>
                     <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                       {userTasks.map(task => <TaskCard key={task.id} task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={reportCompact} onArchive={(t) => openArchive('task', t)} />)}
+                       {userTasks.map(task => <TaskCard key={task.id} task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} compact={reportCompact} onArchive={(t) => openArchive('task', t)} />)}
                        {userNotes.map(note => (
                          <div key={note.id} className={`p-4 rounded-2xl border border-black/5 shadow-sm flex flex-col gap-2 ${note.color || 'bg-yellow-100/70'}`}>
                            <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-500"><PenSquare className="w-3.5 h-3.5" /> 便利貼</div>
@@ -3150,7 +3158,7 @@
             </div>
             <div className="px-4 pb-1 bg-slate-950/50">
                <input type="file" ref={jiraFileRef} onChange={handleJiraImport} accept=".json" className="hidden" />
-               <button onClick={async () => { try { setJiraSyncMsg('存檔中…'); try { if (flushSaveRef.current) flushSaveRef.current(); } catch (e) {} await new Promise(r => setTimeout(r, 1200)); await setDoc(doc(fbDb, 'users', uid, 'control', 'syncRequest'), { ts: Date.now() }); setJiraSyncMsg('已送出，約 1 分鐘內同步'); setTimeout(() => setJiraSyncMsg(''), 8000); } catch (e) { setJiraSyncMsg('送出失敗，稍後再試'); } }} title="立刻請求同步 Jira（雙向），約 1 分鐘內完成，不用等排程" className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-sky-700/60 hover:bg-sky-600/70 text-sky-100 text-xs font-black transition-colors"><Clock className="w-3.5 h-3.5" /> {jiraSyncMsg || '⚡ 現在同步 Jira'}</button>
+               <button onClick={async () => { try { setJiraSyncMsg('存檔中…'); try { if (flushSaveRef.current) flushSaveRef.current(); } catch (e) {} await new Promise(r => setTimeout(r, 1200)); await setDoc(doc(fbDb, 'users', uid, 'control', 'syncRequest'), { ts: Date.now() }); setJiraSyncMsg('已送出，約 2 分鐘內同步'); setTimeout(() => setJiraSyncMsg(''), 8000); } catch (e) { setJiraSyncMsg('送出失敗，稍後再試'); } }} title="立刻請求同步 Jira（雙向），約 2 分鐘內完成，不用等排程" className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-sky-700/60 hover:bg-sky-600/70 text-sky-100 text-xs font-black transition-colors"><Clock className="w-3.5 h-3.5" /> {jiraSyncMsg || '⚡ 現在同步 Jira'}</button>
             </div>
             <div className="px-4 pb-2 flex items-center justify-between gap-2 bg-slate-950/50">
                <div className="flex flex-col">
@@ -3362,7 +3370,7 @@
                     <span className="text-white font-black text-sm drop-shadow">任務內容（直接作業，改完自動同步）</span>
                     <button onClick={() => setDetailTaskId(null)} className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center text-slate-700 hover:bg-white shadow shrink-0" title="關閉"><X className="w-5 h-5" /></button>
                   </div>
-                  <TaskCard task={dt} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} compact={false} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} linkedTasks={linked} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={(id) => { setDetailTaskId(null); jumpToTask(id); }} onUnlink={unlinkTasks} statusTitle={statusTitle} />
+                  <TaskCard task={dt} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} compact={false} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} linkedTasks={linked} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={(id) => { setDetailTaskId(null); jumpToTask(id); }} onUnlink={unlinkTasks} statusTitle={statusTitle} />
                 </div>
               </div>
             );
