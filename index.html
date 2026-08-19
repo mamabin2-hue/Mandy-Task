@@ -3037,22 +3037,22 @@
                  <div className="text-[10px] font-black text-slate-500 mb-2 px-2 tracking-widest uppercase">主要功能 MAIN</div>
                  {[
                    { id: 'board', icon: LayoutDashboard, label: '看板模式' },
-                   { id: 'focus', icon: Zap, label: '工作台' },
-                   { id: 'sheet', icon: ListIcon, label: '任務總表' },
-                   { id: 'planner', icon: Calendar, label: '每日/週計劃' },
-                   { id: 'dedup', icon: Copy, label: '找重複' },
                    { id: 'notes', icon: PenSquare, label: '隨手筆記' },
-                   { id: 'recycle', icon: Trash, label: '回收桶' },
                    { id: 'report', icon: MessageSquare, label: '匯報清單' },
+                   { id: 'focus', icon: Zap, label: '工作台' },
+                   { id: 'planner', icon: Calendar, label: '每日/週計劃' },
+                   { id: 'sheet', icon: ListIcon, label: '任務總表' },
                    { id: 'kb', icon: BookOpen, label: '知識管理' },
+                   { id: 'dedup', icon: Copy, label: '找重複' },
                    { id: 'stats', icon: BarChart2, label: '統計報表' },
-                   { id: 'ceo', icon: TrendingUp, label: 'CEO 儀表板' },
+                   { id: 'ceo', icon: TrendingUp, label: 'CEO 儀表板', sub: true },
                    { id: 'done', icon: CheckCircle, label: '已完成' },
                    { id: 'settings', icon: Settings, label: '系統設定' },
-                   { id: 'guide', icon: Info, label: '系統說明' }
+                   { id: 'guide', icon: Info, label: '系統說明' },
+                   { id: 'recycle', icon: Trash, label: '回收桶' }
                  ].map(item => (
-                   <button key={item.id} onClick={() => { setActiveView(item.id); if (typeof window !== 'undefined' && window.innerWidth < 1024) setIsSidebarOpen(false); }} className={`flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all ${activeView === item.id ? 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50' : 'hover:bg-slate-800 hover:text-white'}`}>
-                     <item.icon className="w-5 h-5" /> {item.label}
+                   <button key={item.id} onClick={() => { setActiveView(item.id); if (typeof window !== 'undefined' && window.innerWidth < 1024) setIsSidebarOpen(false); }} className={`flex items-center gap-3 rounded-xl font-bold transition-all ${item.sub ? 'ml-3 pl-4 pr-4 py-2 text-sm border-l-2 border-slate-700' : 'px-4 py-3'} ${activeView === item.id ? (item.sub ? 'bg-indigo-600/80 text-white border-indigo-400' : 'bg-indigo-600 text-white shadow-md shadow-indigo-900/50') : 'hover:bg-slate-800 hover:text-white'}`}>
+                     <item.icon className={item.sub ? 'w-4 h-4' : 'w-5 h-5'} /> {item.label}
                    </button>
                  ))}
                </div>
