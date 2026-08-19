@@ -2438,7 +2438,7 @@
                   // 搜尋中：不符關鍵字的便利貼隱藏（用 return null 保留原索引，拖曳排序不受影響）
                   if (searching) { const q = searchQuery.trim().toLowerCase(); const hay = [note.text, note.tag].filter(Boolean).join(' ').toLowerCase(); if (!hay.includes(q)) return null; }
                   return (
-                  <div key={note.id} draggable onDragStart={(e) => { setDraggedNoteIndex(index); e.dataTransfer.effectAllowed = "move"; }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
+                  <div key={note.id} draggable onDragStart={(e) => { setDraggedNoteIndex(index); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData('text/plain', 'note-' + index); } catch (err) {} }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
                            e.preventDefault();
                            if (draggedNoteIndex === null || draggedNoteIndex === index) return;
                            const newNotes = [...notes];
@@ -2465,6 +2465,9 @@
                         <select className="text-xs font-black bg-white/60 px-2 py-1.5 rounded-lg text-slate-700 outline-none cursor-pointer hover:bg-white/80 transition-colors border-none shadow-sm" value={note.tag || ''} onChange={(e) => setNotes(notes.map(n => n.id === note.id ? {...n, tag: e.target.value} : n))}>
                            <option value="">- 無相關人員 -</option>{users.map(u => <option key={u} value={u}>@ {u}</option>)}
                         </select>
+                        <select value={sheetOf(note)} onChange={(e) => moveNoteToSheet(note.id, e.target.value)} title="移到哪個分頁" className="text-xs font-black bg-indigo-50 text-indigo-700 px-2 py-1.5 rounded-lg outline-none cursor-pointer hover:bg-indigo-100 transition-colors border-none shadow-sm">
+                           {sheetList.map(s => <option key={s.id} value={s.id}>📑 {s.title}</option>)}
+                        </select>
                         <div className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-[11px] font-bold shadow-sm ${note.remindDate ? 'bg-rose-50 text-rose-600' : 'bg-white/60 text-slate-500'}`} title="設提醒日：LINE 每天早上會提醒（可清除）">
                           <Calendar className="w-3 h-3" />
                           <input type="date" value={note.remindDate || ''} onChange={(e) => setNotes(notes.map(n => n.id === note.id ? {...n, remindDate: e.target.value} : n))} className="bg-transparent outline-none cursor-pointer w-[104px]" />
@@ -2481,9 +2484,6 @@
                         <button onClick={() => setNotes(notes.map(n => n.id === note.id ? { ...n, mailOutlook: !n.mailOutlook } : n))} title={note.mailOutlook ? '已標記：電腦上執行「Outlook草稿」程式時會用桌面 Outlook 開這則草稿（再點取消）' : '標記用桌面 Outlook 開草稿（執行 Outlook草稿程式時會開現場 Outlook，不用雲端版）'} className={`w-7 h-7 rounded-full flex items-center justify-center shadow-sm ${note.mailOutlook ? 'bg-indigo-600 text-white' : 'bg-white/60 hover:bg-indigo-500 hover:text-white text-slate-500'}`}><Mail className="w-3.5 h-3.5" /></button>
                         <button onClick={() => { if (!(note.text || '').trim()) return; if (window.confirm('把這則筆記送到匯報清單（會建立一則任務' + (note.tag ? '，匯報給 ' + note.tag : '') + '）？')) { setTasks([healTaskData({ id: Date.now().toString(), text: note.text, assignee: note.tag || '', status: 'todo', category: '', period: '不指定時段', createdAt: new Date().toISOString() }), ...tasks]); } }} title="送到匯報清單（建立任務）" className="w-7 h-7 bg-white/60 hover:bg-emerald-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Send className="w-3.5 h-3.5" /></button>
                         <button onClick={() => openArchive('note', note)} title="歸檔到知識庫（自動建議分類）" className="w-7 h-7 bg-white/60 hover:bg-amber-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><BookOpen className="w-3.5 h-3.5" /></button>
-                        <select value={sheetOf(note)} onChange={(e) => moveNoteToSheet(note.id, e.target.value)} title="移到哪個分頁" className="h-7 bg-white/70 hover:bg-white rounded-full text-[11px] font-black text-slate-600 px-2 outline-none cursor-pointer shadow-sm border-none max-w-[90px]">
-                           {sheetList.map(s => <option key={s.id} value={s.id}>{s.title}</option>)}
-                        </select>
                         <button onClick={() => { setNotes(notes.filter(n => n.id !== note.id)); setDeletedNotes([{ ...note, deletedAt: new Date().toISOString() }, ...deletedNotes]); }} title="刪除（可到回收桶復原）" className="w-7 h-7 bg-white/60 hover:bg-red-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Trash2 className="w-3.5 h-3.5" /></button>
                      </div>
                   </div>
