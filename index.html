@@ -1133,20 +1133,35 @@
         let mergedDeadline = main && main.deadline ? main.deadline : ''; let bestDl = Number.MAX_SAFE_INTEGER;
         sorted.forEach((t) => { const dl = t && t.deadline; if (!dl) return; const d = new Date(dl).getTime(); const v = Number.isFinite(d) ? d : Number.MAX_SAFE_INTEGER; if (v < bestDl) { bestDl = v; mergedDeadline = dl; } });
         const fillFrom = (field) => { if (main && main[field]) return main[field]; for (let i = 0; i < others.length; i++) { if (others[i] && others[i][field]) return others[i][field]; } return main ? main[field] : undefined; };
-        const mergedMain = Object.assign({}, main, { logs: mergedLogs, timeSpent: mergedTime, status: mergedStatus, deadline: mergedDeadline, note: fillFrom('note'), assignee: fillFrom('assignee'), category: fillFrom('category') });
+        // 備註：把所有「不重複的非空備註」全部保留（不同就用分隔線接起來），絕不丟任何一則
+        const noteParts = []; sorted.forEach((t) => { const n = String((t && t.note) || '').trim(); if (n && !noteParts.includes(n)) noteParts.push(n); });
+        const mergedNote = noteParts.join('\n———（合併自另一張重複任務）———\n');
+        // 圖片 / 子任務 / 連結：全部併起來（去重），不丟內容
+        let mergedImages = []; sorted.forEach((t) => { if (Array.isArray(t && t.images)) mergedImages = mergedImages.concat(t.images); });
+        const mergedSubs = []; const subIds = new Set(); sorted.forEach((t) => { (Array.isArray(t && t.subtasks) ? t.subtasks : []).forEach((s) => { if (s && !subIds.has(s.id)) { subIds.add(s.id); mergedSubs.push(s); } }); });
+        const linkSet = new Set(); sorted.forEach((t) => { (Array.isArray(t && t.linkedIds) ? t.linkedIds : []).forEach((id) => { if (id) linkSet.add(id); }); });
+        const mergedMain = Object.assign({}, main, { logs: mergedLogs, timeSpent: mergedTime, status: mergedStatus, deadline: mergedDeadline, note: mergedNote, images: mergedImages, subtasks: mergedSubs, linkedIds: [...linkSet], jiraKey: fillFrom('jiraKey'), assignee: fillFrom('assignee'), category: fillFrom('category') });
         return sourceArr.filter((t) => !(t && removeIds.has(t.id))).map((t) => (t && main && t.id === main.id ? mergedMain : t));
       };
-      const handleMergeGroup = (group) => { const removeCount = group.length - 1; if (removeCount < 1) return; if (!window.confirm(`確認合併這組？將保留最早建立的 1 筆、刪除其餘 ${removeCount} 筆（logs 與投入時間會併入保留的任務）。`)) return; setTasks(mergeGroup(group, Array.isArray(tasks) ? tasks : [])); };
-      const handleMergeAll = () => { if (!exactGroups.length) return; const totalRemove = exactGroups.reduce((s, g) => s + (g.length - 1), 0); if (!window.confirm(`確認一鍵合併全部 ${exactGroups.length} 組完全重複？總共會刪除 ${totalRemove} 筆重複任務。`)) return; let next = Array.isArray(tasks) ? tasks : []; exactGroups.forEach((g) => { next = mergeGroup(g, next); }); setTasks(next); };
+      const handleMergeGroup = (group) => { const removeCount = group.length - 1; if (removeCount < 1) return; if (!window.confirm(`確認合併這組？\n\n保留最早建立的 1 筆，其餘 ${removeCount} 筆併進去。\n備註、圖片、子任務、log、投入時間、連結全部合併保留 —— 不會刪掉任何內容。`)) return; setTasks(mergeGroup(group, Array.isArray(tasks) ? tasks : [])); };
+      const handleMergeAll = () => { if (!exactGroups.length) return; const totalRemove = exactGroups.reduce((s, g) => s + (g.length - 1), 0); if (!window.confirm(`確認一鍵合併全部 ${exactGroups.length} 組完全重複？\n\n共併 ${totalRemove} 筆。備註/圖片/子任務/log 全部合併保留,不會刪內容。`)) return; let next = Array.isArray(tasks) ? tasks : []; exactGroups.forEach((g) => { next = mergeGroup(g, next); }); setTasks(next); };
+      const noteLen = (t) => String((t && t.note) || '').trim().length;
+      const imgCount = (t) => (Array.isArray(t && t.images) ? t.images.length : 0);
       const TaskRow = ({ t, isMain }) => (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 rounded-2xl bg-slate-50 border border-slate-100 text-sm">
-          {isMain && (<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium"><Check size={12} /> 保留</span>)}
-          <span className="font-medium text-slate-800 break-words min-w-0">{(t && t.text) || '（無標題）'}</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs ${statusColor(t && t.status)}`}>{statusLabel(t && t.status)}</span>
-          {t && t.category ? <span className="px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 text-xs">{t.category}</span> : null}
-          <span className="text-xs text-slate-500">建立 {fmtDate(t && t.createdAt)}</span>
-          <span className="text-xs text-slate-500">投入 {Math.round(num(t && t.timeSpent))} 分</span>
-          <span className="text-xs text-slate-500">{logCount(t)} 筆 log</span>
+        <div className="flex flex-col gap-1 px-3 py-2 rounded-2xl bg-slate-50 border border-slate-100 text-sm">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            {isMain && (<span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-xs font-medium"><Check size={12} /> 保留(內容會併到這張)</span>)}
+            <span className="font-medium text-slate-800 break-words min-w-0">{(t && t.text) || '（無標題）'}</span>
+            <span className={`px-2 py-0.5 rounded-full text-xs ${statusColor(t && t.status)}`}>{statusLabel(t && t.status)}</span>
+            {t && t.category ? <span className="px-2 py-0.5 rounded-full bg-sky-100 text-sky-700 text-xs">{t.category}</span> : null}
+            {t && t.jiraKey ? <span className="px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 text-xs">{t.jiraKey}</span> : null}
+            <span className="text-xs text-slate-500">建立 {fmtDate(t && t.createdAt)}</span>
+            <span className="text-xs text-slate-500">投入 {Math.round(num(t && t.timeSpent))} 分</span>
+            <span className="text-xs text-slate-500">{logCount(t)} 筆 log</span>
+            <span className={`text-xs font-bold ${noteLen(t) ? 'text-emerald-600' : 'text-slate-400'}`}>備註 {noteLen(t)} 字</span>
+            {imgCount(t) > 0 && <span className="text-xs font-bold text-purple-600">圖 {imgCount(t)}</span>}
+          </div>
+          {noteLen(t) > 0 && <div className="text-xs text-slate-500 bg-white/70 rounded-lg px-2 py-1 whitespace-pre-wrap break-words max-h-24 overflow-y-auto">{String(t.note).slice(0, 300)}{String(t.note).length > 300 ? '…' : ''}</div>}
         </div>
       );
       const hasDup = exactGroups.length > 0 || similarPairs.length > 0;
