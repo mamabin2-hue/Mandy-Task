@@ -1121,9 +1121,10 @@
         } }
         return pairs;
       }, [tasks]);
-      const mergeGroup = (group, sourceArr) => {
+      const mergeGroup = (group, sourceArr, keepId) => {
         const sorted = group.slice().sort((a, b) => createdVal(a) - createdVal(b));
-        const main = sorted[0]; const others = sorted.slice(1);
+        const main = (keepId && group.find((t) => t && t.id === keepId)) || sorted[0];   // 可指定保留哪張(標題以它為主),預設最早建立
+        const others = sorted.filter((t) => t && main && t.id !== main.id);
         const removeIds = new Set(others.map((t) => t && t.id));
         let mergedLogs = []; sorted.forEach((t) => { if (Array.isArray(t && t.logs)) mergedLogs = mergedLogs.concat(t.logs); });
         const mergedTime = sorted.reduce((sum, t) => sum + num(t && t.timeSpent), 0);
@@ -1197,7 +1198,12 @@
                   <div key={`sim-${pi}`} className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4">
                     <div className="text-sm font-medium text-slate-600 mb-3">疑似相似組 {pi + 1}</div>
                     <div className="space-y-2">{pair.map((t, ti) => (<TaskRow key={(t && t.id) || `p${pi}-${ti}`} t={t} isMain={false} />))}</div>
-                    <p className="text-xs text-slate-400 mt-2">此組不提供自動合併，請自行確認是否為同一任務。</p>
+                    <p className="text-xs text-slate-400 mt-2">名稱相近但不完全一樣。<span className="text-slate-500 font-bold">確認是同一件事</span>再合併(內容全部保留、不會刪)；不是就略過。</p>
+                    <div className="flex flex-wrap gap-2 mt-2">
+                      {pair.map((t, ti) => (
+                        <button key={'mk' + ti} onClick={() => { if (!window.confirm('把這兩張合併成一張,保留標題「' + ((t && t.text) || '') + '」?\n兩張的備註/圖片/子任務/log 全部併起來,不會刪內容。')) return; setTasks(mergeGroup(pair, Array.isArray(tasks) ? tasks : [], t && t.id)); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold transition"><Copy size={13} /> 合併,標題留「{String((t && t.text) || '').slice(0, 12)}{String((t && t.text) || '').length > 12 ? '…' : ''}」</button>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
