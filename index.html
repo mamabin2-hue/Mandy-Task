@@ -1436,8 +1436,8 @@
                 <div key={z.id} className={`flex-1 min-w-[260px] w-full rounded-3xl border shadow-sm flex flex-col ${styles.wrap}`}
                   onDragOver={(e) => { if (Array.from(e.dataTransfer.types || []).includes('fzzoneid')) e.preventDefault(); }}
                   onDrop={(e) => { const zd = e.dataTransfer.getData('fzZoneId'); if (zd) { e.preventDefault(); reorderZoneTo(zd, z.id); } }}>
-                  <div className={`flex items-center justify-between px-4 pt-4 pb-3 ${z.id !== 'none' ? 'cursor-grab active:cursor-grabbing' : ''}`}
-                    draggable={z.id !== 'none'} onDragStart={(e) => { if (z.id !== 'none') e.dataTransfer.setData('fzZoneId', z.id); }} title={z.id !== 'none' ? '按住整欄標題可拖曳調整欄位順序' : ''}>
+                  <div className={`flex items-center justify-between px-4 pt-4 pb-3 select-none ${z.id !== 'none' ? 'cursor-grab active:cursor-grabbing' : ''}`}
+                    draggable={z.id !== 'none'} onDragStart={(e) => { if (z.id !== 'none') { e.dataTransfer.setData('fzZoneId', z.id); e.dataTransfer.effectAllowed = 'move'; } }} title={z.id !== 'none' ? '按住整欄標題可拖曳調整欄位順序（或用 ◀ ▶ 鈕）' : ''}>
                     <div className="flex items-center gap-2 min-w-0"><span className={`inline-flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${styles.iconWrap}`}><Icon size={16} /></span><span className={`text-sm font-semibold truncate ${styles.head}`}>{z.title}</span></div>
                     <div className="flex items-center gap-1 shrink-0">
                       {z.id !== 'none' && (<><button onClick={() => moveZone(z.id, -1)} title="欄位往左移" className="w-6 h-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-white font-black">◀</button><button onClick={() => moveZone(z.id, 1)} title="欄位往右移" className="w-6 h-6 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-white font-black">▶</button></>)}
