@@ -1,0 +1,8 @@
+# 複製成 _state/jira_config.txt 再填以下欄位（此檔勿上傳到公開 repo）
+JIRA_SITE=你的網域.atlassian.net
+JIRA_EMAIL=你的Jira登入Email
+JIRA_TOKEN=你的JiraAPIToken
+PROJECT_KEY=要建到的專案代號
+ISSUE_TYPE=任務
+PULL_LABEL=回Task
+FIREBASE_UID=你的FirebaseUID
