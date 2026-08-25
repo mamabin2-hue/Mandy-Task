@@ -53,7 +53,7 @@
       LayoutDashboard, List as ListIcon, PenSquare, MessageSquare, BarChart2, 
       Settings, BookOpen, Plus, Search, Filter, Calendar, Clock, User, 
       Trash2, Edit2, Play, Square, CheckCircle, ChevronDown, PieChart as PieChartIcon, 
-      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle, Mail, Send, RotateCcw, Trash, ArrowRightCircle, ChevronsUp, ChevronsDown
+      AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle, Mail, Send, RotateCcw, Trash, ArrowRightCircle, ChevronsUp, ChevronsDown, GripVertical
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
     import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, setPersistence, browserLocalPersistence } from 'firebase/auth';
@@ -395,6 +395,7 @@
               )}
               {moveTaskInColumn && (
                 <div className="flex items-center gap-1 ml-auto">
+                  <span draggable onDragStart={(e) => { e.dataTransfer.setData('taskId', task.id); e.dataTransfer.effectAllowed = 'move'; }} title="按住這個把手才會拖動卡片；卡片其他地方都可以自由選字複製" className="inline-flex items-center gap-0.5 px-1.5 h-7 rounded-lg cursor-grab active:cursor-grabbing text-slate-400 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 border border-slate-200 select-none"><GripVertical className="w-4 h-4" /></span>
                   {moveTaskToEdge && <button onClick={(e) => { e.stopPropagation(); moveTaskToEdge(task.id, 'top'); }} onDragStart={stopDragAndDrop} title="移到這欄最上面" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors"><ChevronsUp className="w-4 h-4" /></button>}
                   <button onClick={(e) => { e.stopPropagation(); moveTaskInColumn(task.id, -1); }} onDragStart={stopDragAndDrop} title="往上移一格" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors">↑</button>
                   <button onClick={(e) => { e.stopPropagation(); moveTaskInColumn(task.id, 1); }} onDragStart={stopDragAndDrop} title="往下移一格" className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border border-slate-200 transition-colors">↓</button>
@@ -1377,10 +1378,11 @@
         if (!task) return null;
         const text = task.text || '(未命名任務)'; const category = task.category || ''; const deadline = task.deadline ? fmtDeadline(task.deadline) : '';
         return (
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex flex-col gap-3" draggable onDragStart={(e) => e.dataTransfer.setData('fzTaskId', task.id)} onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const id = e.dataTransfer.getData('fzTaskId'); if (id) zoneDrop(id, task.id, zone); }}>
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 flex flex-col gap-3" onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const id = e.dataTransfer.getData('fzTaskId'); if (id) zoneDrop(id, task.id, zone); }}>
             <div className="flex items-start gap-2">
               <p onClick={() => onOpenDetail && onOpenDetail(task.id)} title="點一下打開完整內容作業（備註、計時、子任務、連結…）" className={'flex-1 text-sm font-medium text-slate-800 break-words leading-relaxed' + (onOpenDetail ? ' cursor-pointer hover:text-indigo-600' : '')}>{text}</p>
               <div className="flex items-center gap-0.5 shrink-0">
+                <span draggable onDragStart={(e) => { e.dataTransfer.setData('fzTaskId', task.id); e.dataTransfer.effectAllowed = 'move'; }} title="按住這個把手才會拖動卡片；其他地方可自由選字" className="inline-flex items-center px-1 h-6 rounded cursor-grab active:cursor-grabbing text-slate-400 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 select-none"><GripVertical className="w-3.5 h-3.5" /></span>
                 <button onClick={() => zoneEdge(task.id, 'top')} title="移到本欄最上面" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50"><ChevronsUp className="w-3.5 h-3.5" /></button>
                 <button onClick={() => zoneMove(task.id, -1)} title="上移一格" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">↑</button>
                 <button onClick={() => zoneMove(task.id, 1)} title="下移一格" className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50">↓</button>
@@ -2381,7 +2383,7 @@
                   </div>
                   <div className="flex flex-col gap-0 min-h-[200px]">
                      {data.map(task => (
-                        <div key={task.id} id={'taskcard-' + task.id} draggable onDragStart={e=>e.dataTransfer.setData('taskId', task.id)} onDragOver={e=>{ e.preventDefault(); }} onDrop={(e)=>{ e.preventDefault(); e.stopPropagation(); const draggedId = e.dataTransfer.getData('taskId'); if(draggedId) moveTaskRelative(draggedId, task.id, col.id); }}>
+                        <div key={task.id} id={'taskcard-' + task.id} onDragOver={e=>{ e.preventDefault(); }} onDrop={(e)=>{ e.preventDefault(); e.stopPropagation(); const draggedId = e.dataTransfer.getData('taskId'); if(draggedId) moveTaskRelative(draggedId, task.id, col.id); }}>
                           <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} updateLogDuration={updateLogDuration} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} moveTaskToEdge={moveTaskToEdge} linkedTasks={(task.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }))} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={jumpToTask} onUnlink={unlinkTasks} statusTitle={statusTitle} />
                         </div>
                      ))}
