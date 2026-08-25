@@ -2585,8 +2585,13 @@
                        {userTasks.map(task => <TaskCard key={task.id} task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} updateLogDuration={updateLogDuration} compact={reportCompact} onArchive={(t) => openArchive('task', t)} />)}
                        {userNotes.map(note => (
                          <div key={note.id} className={`p-4 rounded-2xl border border-black/5 shadow-sm flex flex-col gap-2 ${note.color || 'bg-yellow-100/70'}`}>
-                           <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-500"><PenSquare className="w-3.5 h-3.5" /> 便利貼</div>
-                           <p className="text-sm font-bold text-slate-700 break-words whitespace-pre-wrap leading-relaxed line-clamp-6">{note.text || '(空白便利貼)'}</p>
+                           <div className="flex items-center justify-between gap-2">
+                             <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-500"><PenSquare className="w-3.5 h-3.5" /> 便利貼（可直接點入編輯）</div>
+                             <select value={note.tag || ''} onChange={(e) => setNotes(notes.map(n => n.id === note.id ? { ...n, tag: e.target.value } : n))} className="text-[11px] font-black bg-white/70 px-2 py-1 rounded-lg text-slate-600 outline-none cursor-pointer border-none shadow-sm" title="匯報對象">
+                               <option value="">- 無匯報對象 -</option>{users.map(u => <option key={u} value={u}>@ {u}</option>)}
+                             </select>
+                           </div>
+                           <textarea value={note.text || ''} onChange={(e) => setNotes(notes.map(n => n.id === note.id ? { ...n, text: e.target.value } : n))} placeholder="點此輸入便利貼內容…" className="w-full bg-transparent resize-none outline-none text-sm font-bold text-slate-700 leading-relaxed overflow-y-auto custom-scrollbar" style={{ minHeight: '96px', maxHeight: '220px' }} />
                          </div>
                        ))}
                     </div>
