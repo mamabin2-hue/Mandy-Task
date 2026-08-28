@@ -2493,7 +2493,7 @@
                   // 搜尋中：不符關鍵字的便利貼隱藏（用 return null 保留原索引，拖曳排序不受影響）
                   if (searching) { const q = searchQuery.trim().toLowerCase(); const hay = [note.text, note.tag].filter(Boolean).join(' ').toLowerCase(); if (!hay.includes(q)) return null; }
                   return (
-                  <div key={note.id} draggable onDragStart={(e) => { setDraggedNoteIndex(index); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData('text/plain', 'note-' + index); } catch (err) {} }} onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
+                  <div key={note.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
                            e.preventDefault();
                            if (draggedNoteIndex === null || draggedNoteIndex === index) return;
                            const newNotes = [...notes];
@@ -2503,7 +2503,7 @@
                            setNotes(newNotes);
                            setDraggedNoteIndex(null);
                        }}
-                       className={`p-6 rounded-3xl shadow-sm hover:shadow-md transition-all relative group flex flex-col gap-4 cursor-grab active:cursor-grabbing border border-black/5 ${note.color || 'bg-yellow-100/70'}`}>
+                       className={`p-6 rounded-3xl shadow-sm hover:shadow-md transition-all relative group flex flex-col gap-4 border border-black/5 ${note.color || 'bg-yellow-100/70'}`}>
                      <textarea className="w-full flex-1 bg-transparent resize-none outline-none font-bold text-slate-800 overflow-y-auto leading-relaxed custom-scrollbar" style={{ minHeight: '120px', maxHeight: '260px' }} value={note.text} onChange={e => setNotes(notes.map(n => n.id === note.id ? {...n, text: e.target.value} : n))} onPaste={(e) => { const items = (e.clipboardData && e.clipboardData.items) ? e.clipboardData.items : []; for (let i = 0; i < items.length; i++) { if (items[i].type && items[i].type.indexOf('image') === 0) { const blob = items[i].getAsFile(); if (blob) { e.preventDefault(); addImageToNote(note.id, blob); } } } }} title="可直接貼上圖片（Ctrl+V）" />
                      {Array.isArray(note.images) && note.images.length > 0 && (
                        <div className="flex flex-wrap gap-2 pt-1">
@@ -2535,7 +2535,8 @@
                            </div>
                         </div>
                      </div>
-                     <div className="absolute top-3 right-3 flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
+                     <span draggable onDragStart={(e) => { setDraggedNoteIndex(index); e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData('text/plain', 'note-' + index); } catch (err) {} }} onDragEnd={() => setDraggedNoteIndex(null)} title="按住這個把手才會拖動便利貼（排序、或拖到上面的分頁）；便利貼其他地方都可以自由選字複製" className="absolute top-3 right-3 z-10 inline-flex items-center justify-center w-7 h-7 rounded-full bg-white/70 hover:bg-white text-slate-400 hover:text-indigo-600 shadow-sm cursor-grab active:cursor-grabbing select-none transition-colors"><GripVertical className="w-4 h-4" /></span>
+                     <div className="absolute top-3 right-[2.75rem] flex gap-1 opacity-0 group-hover:opacity-100 transition-all">
                         <button onClick={() => setNotes(notes.map(n => n.id === note.id ? { ...n, mailOutlook: !n.mailOutlook } : n))} title={note.mailOutlook ? '已標記：電腦上執行「Outlook草稿」程式時會用桌面 Outlook 開這則草稿（再點取消）' : '標記用桌面 Outlook 開草稿（執行 Outlook草稿程式時會開現場 Outlook，不用雲端版）'} className={`w-7 h-7 rounded-full flex items-center justify-center shadow-sm ${note.mailOutlook ? 'bg-indigo-600 text-white' : 'bg-white/60 hover:bg-indigo-500 hover:text-white text-slate-500'}`}><Mail className="w-3.5 h-3.5" /></button>
                         <button onClick={() => { if (!(note.text || '').trim()) return; if (window.confirm('把這則筆記送到匯報清單（會建立一則任務' + (note.tag ? '，匯報給 ' + note.tag : '') + '）？')) { setTasks([healTaskData({ id: Date.now().toString(), text: note.text, assignee: note.tag || '', status: 'todo', category: '', period: '不指定時段', createdAt: new Date().toISOString() }), ...tasks]); } }} title="送到匯報清單（建立任務）" className="w-7 h-7 bg-white/60 hover:bg-emerald-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><Send className="w-3.5 h-3.5" /></button>
                         <button onClick={() => openArchive('note', note)} title="歸檔到知識庫（自動建議分類）" className="w-7 h-7 bg-white/60 hover:bg-amber-500 hover:text-white rounded-full flex items-center justify-center text-slate-500 shadow-sm"><BookOpen className="w-3.5 h-3.5" /></button>
