@@ -1521,6 +1521,9 @@
       const [dateFrom, setDateFrom] = useState(todayStr());
       const [dateTo, setDateTo] = useState(todayStr());
       const toYmd = (v) => { if (!v) return ''; const str = String(v); if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str; const d = new Date(str); if (isNaN(d)) return ''; return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
+      // 逾期查詢（使用者 2026/09/09）：到期日早於今天、且尚未完成；跟「到期日」區間查詢二選一
+      const [overdueOn, setOverdueOn] = useState(false);
+      const isOverdueTask = (t) => { if (!overdueOn) return true; if (!t || t.status === 'done') return false; const s = toYmd(t.deadline); return !!s && s < todayStr(); };
       const inDateRange = (v) => { if (!dateFilterOn) return true; const s = toYmd(v); if (!s) return false; return (!dateFrom || s >= dateFrom) && (!dateTo || s <= dateTo); };
       const [linkPickerFor, setLinkPickerFor] = useState(null);   // 正在為哪個任務挑選連結對象（存 task 物件）
       const [linkPickerQ, setLinkPickerQ] = useState('');
@@ -2312,10 +2315,10 @@
         }
         if (filterType === 'life') filtered = filtered.filter(t => t.type === 'life');
 
-        filtered = filtered.filter(matchesSearch).filter(t => inDateRange(t.deadline));   // 到期日區間查詢
+        filtered = filtered.filter(matchesSearch).filter(t => inDateRange(t.deadline)).filter(isOverdueTask);   // 到期日區間查詢／逾期查詢
 
         // 一般檢視時，完成超過 7 天的任務自動隱藏；但「搜尋中／日期查詢中」是主動查找 → 不隱藏，才找得到舊的已完成任務
-        if (!searching && !dateFilterOn) {
+        if (!searching && !dateFilterOn && !overdueOn) {
           const now = new Date();
           filtered = filtered.filter(t => {
              if (t.status === 'done') {
@@ -2640,7 +2643,7 @@
         const toggleFilterVal = (col, v) => setSheetFilters(prev => { const cur = prev[col] || []; const next = cur.includes(v) ? cur.filter(x => x !== v) : [...cur, v]; return { ...prev, [col]: next }; });
         const clearFilter = (col) => setSheetFilters(prev => ({ ...prev, [col]: [] }));
         const clearAllFilters = () => setSheetFilters({ status: [], category: [], period: [], assignee: [] });
-        const rows = tasks.filter(matchesSearch).filter(t => inDateRange(t.deadline)).filter(passFilter).slice().sort((a, b) => {
+        const rows = tasks.filter(matchesSearch).filter(t => inDateRange(t.deadline)).filter(isOverdueTask).filter(passFilter).slice().sort((a, b) => {
           const va = val(a, sheetSort.key), vb = val(b, sheetSort.key);
           const cmp = (typeof va === 'number') ? (va - vb) : va.localeCompare(vb, 'zh-Hant');
           return sheetSort.dir === 'asc' ? cmp : -cmp;
@@ -2710,7 +2713,7 @@
                   ))}
                   {rows.length === 0 && (
                     <tr><td colSpan="7" className="py-10 text-center text-slate-400 font-bold">
-                      {searching ? `找不到符合「${searchQuery}」的任務` : dateFilterOn ? `到期日 ${dateFrom}～${dateTo} 沒有任務` : activeFilterCount > 0 ? '沒有符合篩選條件的任務（點右上角清除篩選）' : '目前沒有任務'}
+                      {searching ? `找不到符合「${searchQuery}」的任務` : overdueOn ? '沒有逾期的任務 👍' : dateFilterOn ? `到期日 ${dateFrom}～${dateTo} 沒有任務` : activeFilterCount > 0 ? '沒有符合篩選條件的任務（點右上角清除篩選）' : '目前沒有任務'}
                     </td></tr>
                   )}
                 </tbody>
@@ -3274,7 +3277,7 @@
                   </div>
                   {activeView !== 'focus' && (
                   <div className="flex items-center gap-1.5 shrink-0" title={activeView === 'notes' ? '依便利貼建立日期查詢（區間）' : '依到期日查詢（區間）'}>
-                    <button onClick={() => { if (!dateFilterOn) { setDateFrom(todayStr()); setDateTo(todayStr()); } setDateFilterOn(!dateFilterOn); }} className={`flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-bold border transition-all ${dateFilterOn ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'}`}><Calendar className="w-4 h-4" /><span className="hidden sm:inline">{activeView === 'notes' ? '建立日' : '到期日'}</span></button>
+                    <button onClick={() => { if (!dateFilterOn) { setDateFrom(todayStr()); setDateTo(todayStr()); setOverdueOn(false); } setDateFilterOn(!dateFilterOn); }} className={`flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-bold border transition-all ${dateFilterOn ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-slate-50 text-slate-600 border-slate-200 hover:bg-white'}`}><Calendar className="w-4 h-4" /><span className="hidden sm:inline">{activeView === 'notes' ? '建立日' : '到期日'}</span></button>
                     {dateFilterOn && (<>
                       <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="px-2 py-1.5 rounded-lg bg-white border border-indigo-200 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-200" />
                       <span className="text-xs text-slate-400">～</span>
@@ -3282,6 +3285,9 @@
                       <button onClick={() => { setDateFrom(todayStr()); setDateTo(todayStr()); }} className="text-xs font-bold text-indigo-600 hover:underline px-1">今天</button>
                       <button onClick={() => setDateFilterOn(false)} title="取消日期查詢" className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
                     </>)}
+                    {activeView !== 'notes' && (
+                    <button onClick={() => { if (!overdueOn) setDateFilterOn(false); setOverdueOn(!overdueOn); }} title="只看已過到期日、還沒完成的任務" className={`flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-bold border transition-all ${overdueOn ? 'bg-red-600 text-white border-red-600 shadow-sm' : 'bg-red-50 text-red-600 border-red-200 hover:bg-white'}`}><AlertTriangle className="w-4 h-4" /><span className="hidden sm:inline">逾期</span>{overdueOn && <X className="w-3.5 h-3.5 ml-0.5" />}</button>
+                    )}
                   </div>
                   )}
                   </>
