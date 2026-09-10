@@ -1523,6 +1523,7 @@
       const toYmd = (v) => { if (!v) return ''; const str = String(v); if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str; const d = new Date(str); if (isNaN(d)) return ''; return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); };
       // 逾期查詢（使用者 2026/09/09）：到期日早於今天、且尚未完成；跟「到期日」區間查詢二選一
       const [overdueOn, setOverdueOn] = useState(false);
+      const isOverdueNote = (n) => { if (!overdueOn) return true; const s = toYmd(n && n.remindDate); return !!s && s < todayStr(); };   // 便利貼：提醒日已過
       const isOverdueTask = (t) => { if (!overdueOn) return true; if (!t || t.status === 'done') return false; const s = toYmd(t.deadline); return !!s && s < todayStr(); };
       const inDateRange = (v) => { if (!dateFilterOn) return true; const s = toYmd(v); if (!s) return false; return (!dateFrom || s >= dateFrom) && (!dateTo || s <= dateTo); };
       const [linkPickerFor, setLinkPickerFor] = useState(null);   // 正在為哪個任務挑選連結對象（存 task 物件）
@@ -2493,10 +2494,13 @@
             {searching && notes.filter(n => { const q = searchQuery.trim().toLowerCase(); return [n.text, n.tag].filter(Boolean).join(' ').toLowerCase().includes(q); }).length === 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 text-sm font-bold text-amber-800">找不到符合「{searchQuery}」的便利貼。</div>
             )}
-            {dateFilterOn && notes.filter(n => n && sheetOf(n) === curTab && inDateRange(n.createdAt)).length === 0 && (
+            {overdueOn && notes.filter(n => n && sheetOf(n) === curTab && isOverdueNote(n)).length === 0 && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl px-5 py-4 text-sm font-bold text-emerald-800">這個分頁沒有逾期的便利貼 👍（逾期＝提醒日已過；按上方「逾期」可取消）</div>
+            )}
+            {dateFilterOn && !overdueOn && notes.filter(n => n && sheetOf(n) === curTab && inDateRange(n.createdAt)).length === 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 text-sm font-bold text-amber-800">建立日 {dateFrom}～{dateTo} 這個區間沒有便利貼（按上方「建立日」旁的 ✕ 可取消）。</div>
             )}
-            {!searching && !dateFilterOn && notes.filter(n => n && sheetOf(n) === curTab).length === 0 && (
+            {!searching && !dateFilterOn && !overdueOn && notes.filter(n => n && sheetOf(n) === curTab).length === 0 && (
               <div className="text-center text-slate-400 font-bold py-12 text-sm">{curTab === 'active' ? '目前沒有便利貼，用上面的框新增。' : '這個分頁還沒有便利貼。用便利貼右上角的「移到分頁」下拉，把便利貼收到這裡。'}</div>
             )}
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
@@ -2506,6 +2510,7 @@
                   // 搜尋中：不符關鍵字的便利貼隱藏（用 return null 保留原索引，拖曳排序不受影響）
                   if (searching) { const q = searchQuery.trim().toLowerCase(); const hay = [note.text, note.tag].filter(Boolean).join(' ').toLowerCase(); if (!hay.includes(q)) return null; }
                   if (dateFilterOn && !inDateRange(note.createdAt)) return null;   // 建立日區間查詢
+                  if (!isOverdueNote(note)) return null;   // 逾期查詢（提醒日早於今天）
                   return (
                   <div key={note.id} onDragOver={(e) => e.preventDefault()} onDrop={(e) => {
                            e.preventDefault();
@@ -3285,9 +3290,7 @@
                       <button onClick={() => { setDateFrom(todayStr()); setDateTo(todayStr()); }} className="text-xs font-bold text-indigo-600 hover:underline px-1">今天</button>
                       <button onClick={() => setDateFilterOn(false)} title="取消日期查詢" className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
                     </>)}
-                    {activeView !== 'notes' && (
-                    <button onClick={() => { if (!overdueOn) setDateFilterOn(false); setOverdueOn(!overdueOn); }} title="只看已過到期日、還沒完成的任務" className={`flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-bold border transition-all ${overdueOn ? 'bg-red-600 text-white border-red-600 shadow-sm' : 'bg-red-50 text-red-600 border-red-200 hover:bg-white'}`}><AlertTriangle className="w-4 h-4" /><span className="hidden sm:inline">逾期</span>{overdueOn && <X className="w-3.5 h-3.5 ml-0.5" />}</button>
-                    )}
+                    <button onClick={() => { if (!overdueOn) setDateFilterOn(false); setOverdueOn(!overdueOn); }} title={activeView === 'notes' ? '只看提醒日已過的便利貼' : '只看已過到期日、還沒完成的任務'} className={`flex items-center gap-1 px-3 py-2 rounded-xl text-sm font-bold border transition-all ${overdueOn ? 'bg-red-600 text-white border-red-600 shadow-sm' : 'bg-red-50 text-red-600 border-red-200 hover:bg-white'}`}><AlertTriangle className="w-4 h-4" /><span className="hidden sm:inline">逾期</span>{overdueOn && <X className="w-3.5 h-3.5 ml-0.5" />}</button>
                   </div>
                   )}
                   </>
