@@ -274,7 +274,7 @@
     });
 
     // 任務卡片元件
-    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, updateLogNote, updateLogDuration, compact, onArchive, boardColumns, moveTaskInColumn, moveTaskToEdge, linkedTasks, onOpenLinkPicker, onJumpTask, onUnlink, statusTitle }) => {
+    const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, updateLogNote, updateLogStart, updateLogDuration, compact, onArchive, boardColumns, moveTaskInColumn, moveTaskToEdge, linkedTasks, onOpenLinkPicker, onJumpTask, onUnlink, statusTitle }) => {
       const isRunning = activeTimer === task.id;
       const projectInfo = projects.find(p => p.name === task.category);
       const projectColor = projectInfo?.color || '#cbd5e1';
@@ -295,6 +295,8 @@
       const [manualDate, setManualDate] = useState(new Date().toISOString().split('T')[0]);
       const [manualMins, setManualMins] = useState('');
       const [manualNote, setManualNote] = useState('');
+      const [editingLogId, setEditingLogId] = useState(null);   // 正在改時間的那筆投入紀錄
+      const toLocalInput = (iso) => { const d = new Date(iso); if (isNaN(d)) return ''; const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
       const [newSub, setNewSub] = useState('');
       const [copied, setCopied] = useState(false);
       // 一鍵複製這張任務的內容（標題＋備註）到剪貼簿，不用手動選字（拖曳卡片會讓選字很難）
@@ -503,7 +505,21 @@
                    const dateLabel = isNaN(dateObj) ? '未知時間' : dateObj.toLocaleString('zh-TW', { month:'numeric', day:'numeric', hour:'numeric', minute:'2-digit' });
                    return (
                      <div key={log.id || idx} className={`text-[11px] font-bold px-2 py-1.5 rounded-lg flex justify-between items-center group/log ${isCurrent ? 'bg-indigo-50 text-indigo-700 border border-indigo-100 animate-pulse' : 'bg-slate-50 text-slate-500 hover:bg-slate-100 transition-colors'}`}>
-                       <span className="truncate" title={log.note || ''}>{dateLabel} {log.manual ? '(補)' : ''}{log.note ? ` · ${log.note}` : ''}</span>
+                       {(!isCurrent && updateLogStart && editingLogId === log.id) ? (
+                         <span className="flex items-center gap-1 min-w-0">
+                           <input type="datetime-local" autoFocus defaultValue={toLocalInput(log.start)} onClick={stopDrag} onDragStart={stopDragAndDrop}
+                             onKeyDown={(e) => { if (e.key === 'Escape') setEditingLogId(null); if (e.key === 'Enter') { updateLogStart(task.id, log.id, e.target.value); setEditingLogId(null); } }}
+                             onBlur={(e) => { updateLogStart(task.id, log.id, e.target.value); setEditingLogId(null); }}
+                             className="bg-white border border-indigo-300 text-slate-700 text-[11px] font-bold px-1.5 py-0.5 rounded-md outline-none" />
+                         </span>
+                       ) : (
+                         <span className="truncate" title={log.note || ''}>
+                           {(!isCurrent && updateLogStart) ? (
+                             <button onClick={(e) => { e.stopPropagation(); setEditingLogId(log.id); }} onDragStart={stopDragAndDrop} title="點一下改日期／時間" className="hover:text-indigo-600 hover:underline">{dateLabel}</button>
+                           ) : dateLabel}
+                           {log.manual ? ' (補)' : ''}{log.note ? ` · ${log.note}` : ''}
+                         </span>
+                       )}
                        <div className="flex items-center gap-2">
                          {isCurrent ? (
                             <span className="text-indigo-600 font-black">+{dur}m</span>
@@ -2203,6 +2219,17 @@
         setTasks(prev => prev.map(t => t.id === taskId ? { ...t, logs: (t.logs || []).map(l => l.id === logId ? { ...l, note } : l) } : t));
       }, []);
 
+      // 修正一筆投入紀錄的「時間」（點該筆的日期時間，用日期時間選擇器改；使用者 2026/09/10）
+      const updateLogStart = useCallback((taskId, logId, localStr) => {
+        const d = new Date(localStr);                       // datetime-local 給的是本地時間字串
+        if (!localStr || isNaN(d)) return;
+        setTasks(prev => prev.map(t => t.id === taskId ? { ...t, logs: (t.logs || []).map(l => {
+          if (l.id !== logId) return l;
+          const mins = isNaN(Number(l.duration)) ? 0 : Number(l.duration);
+          return { ...l, start: d.toISOString(), end: new Date(d.getTime() + mins * 60000).toISOString() };
+        }) } : t));
+      }, []);
+
       // 修正「已登記時數」的分鐘數（點該筆的 +Xm 數字），並同步重算總投入
       const updateLogDuration = useCallback((taskId, logId, mins) => {
         const m = parseInt(mins, 10);
@@ -2395,7 +2422,7 @@
                   <div className="flex flex-col gap-0 min-h-[200px]">
                      {data.map(task => (
                         <div key={task.id} id={'taskcard-' + task.id} onDragOver={e=>{ e.preventDefault(); }} onDrop={(e)=>{ e.preventDefault(); e.stopPropagation(); const draggedId = e.dataTransfer.getData('taskId'); if(draggedId) moveTaskRelative(draggedId, task.id, col.id); }}>
-                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} updateLogDuration={updateLogDuration} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} moveTaskToEdge={moveTaskToEdge} linkedTasks={(task.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }))} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={jumpToTask} onUnlink={unlinkTasks} statusTitle={statusTitle} />
+                          <TaskCard task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} updateLogStart={updateLogStart} updateLogDuration={updateLogDuration} compact={boardCompact} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} moveTaskInColumn={moveTaskInColumn} moveTaskToEdge={moveTaskToEdge} linkedTasks={(task.linkedIds || []).map(id => tasks.find(x => x && x.id === id)).filter(Boolean).map(x => ({ id: x.id, text: x.text, status: x.status }))} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={jumpToTask} onUnlink={unlinkTasks} statusTitle={statusTitle} />
                         </div>
                      ))}
                      {data.length === 0 && <div className="w-full h-32 border-2 border-dashed border-slate-200/60 rounded-2xl flex items-center justify-center text-slate-400 font-bold bg-white/50">{searching ? '查無符合' : '無任務或拖曳至此'}</div>}
@@ -2602,7 +2629,7 @@
                  <div key={user} className="flex flex-col gap-4">
                     <h3 className="text-lg font-black text-purple-800 flex items-center gap-2 border-b border-purple-100 pb-2"><User className="w-5 h-5" /> 匯報給：{displayName} <span className="bg-purple-100 text-purple-600 text-xs px-2 py-0.5 rounded-full">{userTasks.length + userNotes.length}</span></h3>
                     <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
-                       {userTasks.map(task => <TaskCard key={task.id} task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} updateLogDuration={updateLogDuration} compact={reportCompact} onArchive={(t) => openArchive('task', t)} />)}
+                       {userTasks.map(task => <TaskCard key={task.id} task={task} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} updateLogStart={updateLogStart} updateLogDuration={updateLogDuration} compact={reportCompact} onArchive={(t) => openArchive('task', t)} />)}
                        {userNotes.map(note => (
                          <div key={note.id} className={`p-4 rounded-2xl border border-black/5 shadow-sm flex flex-col gap-2 ${note.color || 'bg-yellow-100/70'}`}>
                            <div className="flex items-center justify-between gap-2">
@@ -3457,7 +3484,7 @@
                     <span className="text-white font-black text-sm drop-shadow">任務內容（直接作業，改完自動同步）</span>
                     <button onClick={() => setDetailTaskId(null)} className="w-8 h-8 rounded-full bg-white/90 flex items-center justify-center text-slate-700 hover:bg-white shadow shrink-0" title="關閉"><X className="w-5 h-5" /></button>
                   </div>
-                  <TaskCard task={dt} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} updateLogDuration={updateLogDuration} compact={false} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} linkedTasks={linked} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={(id) => { setDetailTaskId(null); jumpToTask(id); }} onUnlink={unlinkTasks} statusTitle={statusTitle} />
+                  <TaskCard task={dt} projects={projects} users={users} activeTimer={activeTimer} updateTask={updateTask} deleteTask={deleteTask} toggleStatus={toggleStatus} toggleTimer={toggleTimer} addManualLog={addManualLog} deleteLog={deleteLog} updateLogNote={updateLogNote} updateLogStart={updateLogStart} updateLogDuration={updateLogDuration} compact={false} onArchive={(t) => openArchive('task', t)} boardColumns={boardColumns} linkedTasks={linked} onOpenLinkPicker={(t) => { setLinkPickerFor(t); setLinkPickerQ(''); }} onJumpTask={(id) => { setDetailTaskId(null); jumpToTask(id); }} onUnlink={unlinkTasks} statusTitle={statusTitle} />
                 </div>
               </div>
             );
