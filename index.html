@@ -273,6 +273,65 @@
       } catch (err) { reject(err); }
     });
 
+    // 專案選擇器：外觀跟原本的下拉一樣，但點開後可以打字模糊搜尋（專案太多時用）
+    // 比對方式：忽略大小寫、忽略空白與 / - ( ) 等符號，所以打「熊本」「htus」「獎金」都找得到
+    const ProjectPicker = ({ projects, value, color, onChange, stopDrag, stopDragAndDrop }) => {
+      const [open, setOpen] = React.useState(false);
+      const [q, setQ] = React.useState('');
+      const boxRef = React.useRef(null);
+      const inputRef = React.useRef(null);
+      React.useEffect(() => {
+        if (!open) return;
+        const away = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) setOpen(false); };
+        document.addEventListener('mousedown', away);
+        return () => document.removeEventListener('mousedown', away);
+      }, [open]);
+      React.useEffect(() => { if (open && inputRef.current) inputRef.current.focus(); }, [open]);
+
+      const norm = (s) => String(s || '').toLowerCase().replace(/[\s\/\-_()（）]/g, '');
+      const sorted = [...(projects || [])].sort((a, b) =>
+        String((a && a.name) || '').localeCompare(String((b && b.name) || ''), 'zh-Hant-u-co-stroke'));
+      const nq = norm(q);
+      const list = nq ? sorted.filter(p => norm(p.name).includes(nq)) : sorted;
+      const pick = (v) => { onChange(v); setOpen(false); setQ(''); };
+
+      return (
+        <div className="relative group/sel" ref={boxRef}>
+          <button type="button" onClick={(e) => { e.stopPropagation(); if (stopDrag) stopDrag(e); setOpen(o => !o); }}
+            onDragStart={stopDragAndDrop} title="點一下可打字搜尋專案"
+            className="appearance-none bg-white border border-slate-200 text-xs font-black py-1.5 pl-3 pr-7 rounded-full shadow-sm outline-none cursor-pointer hover:border-slate-300 transition-colors max-w-[160px] truncate text-left block"
+            style={{ color: color }}>
+            {value || '- 變更專案 -'}
+          </button>
+          <ChevronDown className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" style={{ color: color }} />
+          {open && (
+            <div className="absolute z-50 mt-1 left-0 w-[240px] bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden"
+              onClick={(e) => e.stopPropagation()}>
+              <input ref={inputRef} type="text" value={q} onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); setQ(''); }
+                                    if (e.key === 'Enter' && list.length) pick(list[0].name); }}
+                placeholder="打字搜尋專案…"
+                className="w-full px-3 py-2 text-xs font-bold border-b border-slate-100 outline-none" />
+              <div className="max-h-[240px] overflow-y-auto custom-scrollbar">
+                <button type="button" onClick={() => pick('')}
+                  className={`w-full text-left px-3 py-1.5 text-xs font-bold hover:bg-slate-50 ${!value ? 'bg-indigo-50 text-indigo-700' : 'text-slate-400'}`}>
+                  - 變更專案 -
+                </button>
+                {list.map(p => (
+                  <button key={p.id} type="button" onClick={() => pick(p.name)}
+                    className={`w-full text-left px-3 py-1.5 text-xs font-bold hover:bg-slate-50 flex items-center gap-2 ${p.name === value ? 'bg-indigo-50' : ''}`}>
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color || '#cbd5e1' }}></span>
+                    <span className="truncate" style={{ color: p.color || '#475569' }}>{p.name}</span>
+                  </button>
+                ))}
+                {!list.length && <div className="px-3 py-3 text-xs font-bold text-slate-400">找不到「{q}」</div>}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    };
+
     // 任務卡片元件
     const TaskCard = React.memo(({ task, projects, users, activeTimer, updateTask, deleteTask, toggleStatus, toggleTimer, addManualLog, deleteLog, updateLogNote, updateLogStart, updateLogDuration, compact, onArchive, boardColumns, moveTaskInColumn, moveTaskToEdge, linkedTasks, onOpenLinkPicker, onJumpTask, onUnlink, statusTitle, onExpand }) => {
       const isRunning = activeTimer === task.id;
@@ -352,14 +411,10 @@
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col group transition-all hover:shadow-md w-full relative mb-4 overflow-visible" style={{ borderTopWidth: '6px', borderTopColor: projectColor }}>
           <div className="flex items-center justify-between p-3 border-b border-slate-100 bg-slate-50/80 rounded-t-xl">
              <div className="flex flex-wrap items-center gap-2 flex-1 pr-2">
-               <div className="relative group/sel">
-                 <select className="appearance-none bg-white border border-slate-200 text-xs font-black py-1.5 pl-3 pr-7 rounded-full shadow-sm outline-none cursor-pointer hover:border-slate-300 transition-colors max-w-[160px] truncate" style={{ color: projectColor }} value={task.category || ''} onClick={stopDrag} onDragStart={stopDragAndDrop} onChange={(e) => updateTask(task.id, 'category', e.target.value)}>
-                   <option value="">- 變更專案 -</option>
-                   {[...projects].sort((a, b) => String((a && a.name) || '').localeCompare(String((b && b.name) || ''), 'zh-Hant-u-co-stroke')).map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                 </select>
-                 <ChevronDown className="w-3 h-3 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-50" style={{ color: projectColor }} />
-               </div>
-               
+               <ProjectPicker projects={projects} value={task.category || ''} color={projectColor}
+                 stopDrag={stopDrag} stopDragAndDrop={stopDragAndDrop}
+                 onChange={(v) => updateTask(task.id, 'category', v)} />
+
                <div className="relative group/sel">
                  <select className="appearance-none bg-white border border-slate-200 text-slate-500 text-xs font-bold py-1.5 pl-3 pr-7 rounded-full shadow-sm outline-none cursor-pointer hover:border-slate-300 transition-colors" value={task.period || '不指定時段'} onClick={stopDrag} onDragStart={stopDragAndDrop} onChange={(e) => updateTask(task.id, 'period', e.target.value)}>
                    <option value="不指定時段">不指定時段</option><option value="上午">上午</option><option value="下午">下午</option><option value="晚上/下班">晚上/下班</option>
