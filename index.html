@@ -1620,6 +1620,7 @@
       const [openFilter, setOpenFilter] = useState(null); // 目前展開的篩選欄
       const [boardCompact, setBoardCompact] = useState(() => { try { return localStorage.getItem('mt_board_compact') !== '0'; } catch (e) { return true; } }); // 看板精簡/完整檢視（預設精簡：只看任務名+重點）
       const [reportCompact, setReportCompact] = useState(() => { try { return localStorage.getItem('mt_report_compact') !== '0'; } catch (e) { return true; } }); // 匯報清單精簡/完整（預設精簡）
+      const [reportWho, setReportWho] = useState(() => { try { return localStorage.getItem('mt_report_who') || '__all__'; } catch (e) { return '__all__'; } }); // 匯報清單：只看某一位匯報對象
       const [isSidebarOpen, setIsSidebarOpen] = useState(() => (typeof window !== 'undefined' ? window.innerWidth >= 1024 : true));
       const [isLoaded, setIsLoaded] = useState(false);
       const autoBackupKey = 'mt_last_autobackup_' + (uid || 'anon');
@@ -2679,6 +2680,16 @@
           acc[user] = reportTasks.filter(t => t.assignee === user);
           return acc;
         }, {});
+        // 只列出「真的有東西」的匯報對象，並算出每個人的件數（任務＋便利貼）
+        const peopleCount = reportGroups.map(u => {
+          const n = grouped[u].length +
+            (u === 'All' ? 0 : (Array.isArray(notes) ? notes.filter(x => x && x.tag === u).length : 0));
+          return { user: u, name: u === 'All' ? 'All (所有主管)' : u, n };
+        }).filter(x => x.n > 0);
+        const total = peopleCount.reduce((s, x) => s + x.n, 0);
+        const has = reportWho === '__all__' || peopleCount.some(x => x.user === reportWho);
+        const who = has ? reportWho : '__all__';       // 選到的人已無項目 → 自動回到全部
+        const pickWho = (v) => { setReportWho(v); try { localStorage.setItem('mt_report_who', v); } catch (e) {} };
 
         return (
           <div className="w-full space-y-8 animate-in fade-in duration-300 pb-10">
@@ -2690,7 +2701,27 @@
                </div>
                <button onClick={() => setReportCompact(v => { const nv = !v; try { localStorage.setItem('mt_report_compact', nv ? '1' : '0'); } catch (e) {} return nv; })} className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-bold border shadow-sm transition-colors ${reportCompact ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}><ListIcon className="w-4 h-4" /> {reportCompact ? '精簡' : '完整'}</button>
             </div>
+            {peopleCount.length > 0 && (
+              <div className="bg-white px-4 py-3 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black text-slate-400 shrink-0">匯報對象</span>
+                <button onClick={() => pickWho('__all__')}
+                  className={`px-2.5 py-1 rounded-full text-xs font-black border transition-colors ${who === '__all__' ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-600 border-slate-200 hover:border-purple-300'}`}>
+                  全部 <span className="opacity-70">{total}</span>
+                </button>
+                {peopleCount.map(x => (
+                  <button key={x.user} onClick={() => pickWho(x.user)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-black border transition-colors ${who === x.user ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-slate-600 border-slate-200 hover:border-purple-300'}`}>
+                    {x.name} <span className="opacity-70">{x.n}</span>
+                  </button>
+                ))}
+                {who !== '__all__' && (
+                  <button onClick={() => pickWho('__all__')} title="清除，看全部"
+                    className="ml-auto text-xs font-bold text-slate-400 hover:text-slate-600 underline shrink-0">看全部</button>
+                )}
+              </div>
+            )}
             {Object.entries(grouped).map(([user, userTasks]) => {
+               if (who !== '__all__' && user !== who) return null;
                const userNotes = user === 'All' ? [] : (Array.isArray(notes) ? notes.filter(n => n && n.tag === user) : []);
                if (userTasks.length === 0 && userNotes.length === 0) return null;
                const displayName = user === 'All' ? 'All (所有主管)' : user;
