@@ -912,6 +912,10 @@
       const tasksOnDay = (d) => byDay[dayKey(d)] || [];
       // 待排程池：未完成、且既無計劃日也無截止日的任務（可拖到某天排入）
       const [poolSearch, setPoolSearch] = React.useState('');
+      // 待排程池分欄依據：category=依類別、assignee=依匯報對象（記在 localStorage，下次打開沿用）
+      const [poolGroup, setPoolGroup] = React.useState(() => { try { return localStorage.getItem('mt_plan_group') === 'assignee' ? 'assignee' : 'category'; } catch (e) { return 'category'; } });
+      const pickGroup = (v) => { setPoolGroup(v); try { localStorage.setItem('mt_plan_group', v); } catch (e) {} };
+      const assigneeOf = (t) => { const a = String((t && t.assignee) || '').trim(); return (!a || a === 'none' || a === '- 尚未設定 -') ? '' : a; };
       const _pq = poolSearch.trim().toLowerCase();
       const unplannedAll = safeTasks.filter((t) => t && t.status !== 'done' && !t.planDate && !t.deadline);
       const unplanned = !_pq ? unplannedAll : unplannedAll.filter((t) => [t.text, t.category, t.assignee].filter(Boolean).join(' ').toLowerCase().includes(_pq));
@@ -925,9 +929,10 @@
           <span className="mt-1 w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorOf(t.category) }} />
           <div className="min-w-0 flex-1">
             <div className="text-xs font-medium text-slate-700 truncate">{t.text || '(未命名任務)'}</div>
-            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-400">
+            <div className="flex items-center gap-1 mt-0.5 text-[10px] text-slate-400 flex-wrap">
               <StatusIcon status={t.status} />
               <span className="truncate">{(t.period && t.period !== '不指定時段') ? t.period : statusText(t.status)}</span>
+              {assigneeOf(t) && <span title={'匯報對象：' + assigneeOf(t)} className="inline-flex items-center gap-0.5 px-1.5 rounded-full bg-purple-50 text-purple-600 font-bold shrink-0 max-w-[88px]"><MessageSquare size={9} className="shrink-0" /><span className="truncate">{assigneeOf(t)}</span></span>}
               {worked && <span className="inline-flex items-center gap-0.5 text-emerald-600 font-bold shrink-0"><Clock size={9} />做過{wmins > 0 ? ' ' + wmins + '分' : ''}</span>}
             </div>
           </div>
@@ -950,32 +955,54 @@
           {onPlan && unplannedAll.length > 0 && (
             <div className="mb-3 bg-amber-50/60 border border-amber-200 rounded-2xl p-3">
               <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                <div className="flex items-center gap-2 text-xs font-black text-amber-700"><Calendar size={14} /> 待排程任務（{unplanned.length}{_pq ? '/' + unplannedAll.length : ''}）<span className="font-normal text-amber-500 hidden sm:inline">— 依類別分欄，拖到上面某天就排進計劃</span></div>
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 text-amber-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input type="text" value={poolSearch} onChange={(e) => setPoolSearch(e.target.value)} placeholder="搜尋待排程任務…" className="w-44 sm:w-56 pl-8 pr-7 py-1.5 rounded-lg bg-white border border-amber-200 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-200" />
-                  {poolSearch && <button onClick={() => setPoolSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-400 hover:text-amber-600"><X className="w-3.5 h-3.5" /></button>}
+                <div className="flex items-center gap-2 text-xs font-black text-amber-700"><Calendar size={14} /> 待排程任務（{unplanned.length}{_pq ? '/' + unplannedAll.length : ''}）<span className="font-normal text-amber-500 hidden sm:inline">— 拖到上面某天就排進計劃</span></div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-0.5 bg-white border border-amber-200 rounded-lg p-0.5" title="切換待排程任務的分欄依據">
+                    {[['category', '依類別'], ['assignee', '依匯報對象']].map(([v, label]) => (
+                      <button key={v} onClick={() => pickGroup(v)}
+                        className={'px-2 py-1 text-[11px] font-bold rounded-md transition-colors ' + (poolGroup === v ? 'bg-amber-500 text-white' : 'text-amber-600 hover:bg-amber-50')}>{label}</button>
+                    ))}
+                  </div>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-amber-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input type="text" value={poolSearch} onChange={(e) => setPoolSearch(e.target.value)} placeholder="搜尋待排程任務…" className="w-44 sm:w-56 pl-8 pr-7 py-1.5 rounded-lg bg-white border border-amber-200 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-amber-200" />
+                    {poolSearch && <button onClick={() => setPoolSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-amber-400 hover:text-amber-600"><X className="w-3.5 h-3.5" /></button>}
+                  </div>
                 </div>
               </div>
               {unplanned.length === 0 && <div className="text-xs font-bold text-amber-600 py-3 text-center">找不到符合「{poolSearch}」的待排程任務</div>}
               <div className="flex gap-2 overflow-x-auto pb-1 items-start">
                 {(() => {
+                  const byAssignee = poolGroup === 'assignee';
+                  const EMPTY = byAssignee ? '未指定匯報對象' : '未分類';
                   const groups = {};
-                  unplanned.forEach((t) => { const c = (t.category || '').trim() || '未分類'; (groups[c] = groups[c] || []).push(t); });
-                  const cats = Object.keys(groups).sort((a, b) => { if (a === '未分類') return 1; if (b === '未分類') return -1; return a.localeCompare(b, 'zh-Hant-u-co-stroke'); });
+                  unplanned.forEach((t) => {
+                    const k = (byAssignee ? assigneeOf(t) : String(t.category || '').trim()) || EMPTY;
+                    (groups[k] = groups[k] || []).push(t);
+                  });
+                  const cats = Object.keys(groups).sort((a, b) => { if (a === EMPTY) return 1; if (b === EMPTY) return -1; return a.localeCompare(b, 'zh-Hant-u-co-stroke'); });
                   return cats.map((cat) => (
                     <div key={cat} className="shrink-0 w-[180px] bg-white/70 rounded-xl border border-amber-100 p-2 flex flex-col">
                       <div className="flex items-center gap-1.5 text-[11px] font-black text-slate-600 px-1 pb-1.5 mb-1 border-b border-amber-100">
-                        <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorOf(cat === '未分類' ? '' : cat) }} />
-                        <span className="truncate flex-1">{cat}</span>
+                        {byAssignee
+                          ? <MessageSquare size={11} className={'shrink-0 ' + (cat === EMPTY ? 'text-slate-300' : 'text-purple-500')} />
+                          : <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: colorOf(cat === EMPTY ? '' : cat) }} />}
+                        <span className="truncate flex-1" title={cat}>{cat}</span>
                         <span className="text-slate-400 shrink-0">{groups[cat].length}</span>
                       </div>
                       <div className="flex flex-col gap-1.5 overflow-y-auto max-h-[260px] pr-0.5">
-                        {groups[cat].map((t) => (
-                          <div key={t.id} draggable onDragStart={(e) => e.dataTransfer.setData('planTaskId', t.id)} title="拖到某一天排程" className="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-white border border-amber-200 shadow-sm cursor-grab active:cursor-grabbing hover:border-amber-300">
+                        {groups[cat].map((t) => {
+                          const sub = byAssignee ? String(t.category || '').trim() : assigneeOf(t);
+                          return (
+                          <div key={t.id} draggable onDragStart={(e) => e.dataTransfer.setData('planTaskId', t.id)} title="拖到某一天排程" className="px-2 py-1.5 rounded-lg bg-white border border-amber-200 shadow-sm cursor-grab active:cursor-grabbing hover:border-amber-300">
                             <span className="text-xs font-medium text-slate-700 break-words leading-tight">{t.text || '(未命名任務)'}</span>
+                            {sub && <span className={'mt-1 inline-flex items-center gap-0.5 px-1.5 rounded-full text-[10px] font-bold max-w-full ' + (byAssignee ? 'bg-slate-100 text-slate-500' : 'bg-purple-50 text-purple-600')} title={(byAssignee ? '類別：' : '匯報對象：') + sub}>
+                              {byAssignee ? <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: colorOf(sub) }} /> : <MessageSquare size={9} className="shrink-0" />}
+                              <span className="truncate">{sub}</span>
+                            </span>}
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </div>
                   ));
