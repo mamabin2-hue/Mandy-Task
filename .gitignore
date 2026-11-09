@@ -8,3 +8,6 @@ Mandy-Task.txt
 *API*.txt
 *.lnk
 node_modules/
+firestore-debug.log
+firebase-debug.log
+ui-debug.log

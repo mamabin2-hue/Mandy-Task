@@ -1,0 +1,73 @@
+rules_version = '2';
+// 邀請碼與註冊把關。
+// 部署：Firebase 主控台貼上後發布，或 firebase deploy --only firestore:rules
+// 本檔不含任何真實邀請碼。有效碼是 invites/{邀請碼} 文件，欄位 active == true（布林）。
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    // 呼叫端必須已經知道文件 ID。拒絕含 / 的字串，避免被拼成別的路徑。
+    function inviteActive(code) {
+      return code is string
+        && code.size() > 0
+        && code.size() <= 128
+        && code != '.'
+        && code != '..'
+        && code.matches('^[^/]+$')
+        && exists(/databases/$(database)/documents/invites/$(code))
+        && get(/databases/$(database)/documents/invites/$(code)).data.active == true;
+    }
+
+    // 新註冊：已建立個人檔。舊帳號：早已有 state/main，不必重填邀請碼。
+    function legacyOrInvited(userId) {
+      return exists(/databases/$(database)/documents/users/$(userId))
+        || exists(/databases/$(database)/documents/users/$(userId)/state/main);
+    }
+
+    function profileCreateOk(userId) {
+      return isOwner(userId)
+        && request.resource.data.keys().hasOnly(['inviteCode', 'createdAt'])
+        && request.resource.data.keys().hasAll(['inviteCode', 'createdAt'])
+        && request.resource.data.createdAt is number
+        && inviteActive(request.resource.data.inviteCode);
+    }
+
+    // 只能讀「已經知道 ID」的那一筆。不能列出整個集合，也不能從客戶端新增或修改。
+    match /invites/{code} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // 個人檔。只有註冊當下可建立，而且邀請碼必須存在且 active。
+    // 之後客戶端不能改、不能刪，避免把邀請紀錄洗掉。
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if profileCreateOk(userId);
+      allow update, delete: if false;
+    }
+
+    // 只開放程式現在真正讀寫的子集合，不用萬用字元一次放開整個 users 樹。
+    // 沒有個人檔、也沒有既有 state/main 的帳號，讀寫全部拒絕。
+    match /users/{userId}/state/{docId} {
+      allow read, write: if isOwner(userId) && legacyOrInvited(userId);
+    }
+    match /users/{userId}/backups/{docId} {
+      allow read, write: if isOwner(userId) && legacyOrInvited(userId);
+    }
+    match /users/{userId}/backups_meta/{docId} {
+      allow read, write: if isOwner(userId) && legacyOrInvited(userId);
+    }
+    match /users/{userId}/control/{docId} {
+      allow read, write: if isOwner(userId) && legacyOrInvited(userId);
+    }
+  }
+}
