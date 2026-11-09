@@ -56,7 +56,7 @@
       AlignLeft, Download, Upload, Info, X, Check, FileText, AlertTriangle, TrendingUp, Copy, Zap, PauseCircle, Mail, Send, RotateCcw, Trash, ArrowRightCircle, ChevronsUp, ChevronsDown, GripVertical, Maximize2
     } from 'lucide-react';
     import { initializeApp } from 'firebase/app';
-    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, setPersistence, browserLocalPersistence } from 'firebase/auth';
+    import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, setPersistence, browserLocalPersistence, deleteUser } from 'firebase/auth';
     import { getFirestore, doc, onSnapshot, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 
     // Firebase 連線設定（apiKey 為網頁版公開金鑰，安全由 Firestore 規則 + 登入控管）
@@ -3227,9 +3227,9 @@
                <h4 className="text-lg font-black text-sky-600 mb-2 flex items-center gap-2"><User className="w-5 h-5" /> 怎麼分享給同事</h4>
                <p className="text-slate-600 font-bold text-sm leading-relaxed">
                  1. 把這個網站的<span className="text-sky-600">網址</span>給同事。<br/>
-                 2. 給他<span className="text-sky-600">邀請碼</span>：<span className="inline-block bg-sky-50 text-sky-700 px-2 py-0.5 rounded-md border border-sky-200 font-black tracking-wider">{INVITE_CODE}</span><br/>
-                 3. 他用自己的 Email 註冊（要填邀請碼）即可開始用。<br/>
-                 <span className="text-slate-500">每個人的資料<span className="text-slate-700">各自獨立、看不到彼此</span>；沒有邀請碼的陌生人無法註冊。</span>
+                 2. 私下把管理者提供的<span className="text-sky-600">邀請碼</span>給他（邀請碼不會寫在這個網頁上）。<br/>
+                 3. 他用自己的 Email 註冊，並填入邀請碼，即可開始用。<br/>
+                 <span className="text-slate-500">每個人的資料<span className="text-slate-700">各自獨立、看不到彼此</span>；沒有有效邀請碼的陌生人無法註冊。</span>
                </p>
             </div>
             <div className="bg-white p-8 rounded-3xl border border-emerald-200 shadow-sm">
@@ -3668,11 +3668,72 @@
     }
 
     // ── 登入畫面 ────────────────────────────────────────────
-    // 註冊邀請碼：陌生人不知道碼就無法自助註冊；要分享給同事時，把這個碼給他即可。
-    // 想換碼 → 改下面這行的字串（例如換成當季的碼），重新整理即生效。
-    const INVITE_CODE = 'HL-Task-2026';
+    // 邀請碼不寫在這個檔案裡。有效碼是 Firestore 文件 invites/{邀請碼}，欄位 active 必須是布林 true。
+    // 網頁只能讀「使用者已經知道的那一筆」（規則允許 get、拒絕 list）。換碼只要在 Firebase 新增或停用文件，不用改程式。
+    // 真正把關在規則：建立 users/{uid} 個人檔時，規則會再確認該碼存在且 active。
+    // 已經有 users/{uid}/state/main 的舊帳號不必重填邀請碼。
+    let registrationActive = false;
+    let registrationWaiters = [];
+    let pendingBlockMsg = '';
 
-    function LoginScreen() {
+    function beginRegistration() { registrationActive = true; }
+    function endRegistration() {
+      registrationActive = false;
+      const waiters = registrationWaiters;
+      registrationWaiters = [];
+      waiters.forEach((fn) => fn());
+    }
+    function waitIfRegistering() {
+      if (!registrationActive) return Promise.resolve();
+      return new Promise((resolve) => { registrationWaiters.push(resolve); });
+    }
+    function isPermissionDenied(e2) {
+      const c = (e2 && e2.code) || '';
+      return c === 'permission-denied' || c === 'firestore/permission-denied';
+    }
+    // 文件 ID 限制：不能是空的、不能含 /、不能是 . 或 ..、最長 128。大小寫必須與 Firestore 文件 ID 完全一致。
+    function inviteCodeShapeOk(code) {
+      if (typeof code !== 'string') return false;
+      const c = code.trim();
+      if (!c || c.length > 128) return false;
+      if (c === '.' || c === '..') return false;
+      if (c.indexOf('/') !== -1) return false;
+      if (/^__.*__$/.test(c)) return false;
+      if (/[\u0000-\u001F]/.test(c)) return false;
+      return true;
+    }
+    async function assertInviteActive(code) {
+      const c = (code || '').trim();
+      if (!inviteCodeShapeOk(c)) throw { code: 'bad-invite' };
+      let snap;
+      try {
+        snap = await getDoc(doc(fbDb, 'invites', c));
+      } catch (e2) {
+        if (isPermissionDenied(e2)) throw { code: 'invite-unavailable' };
+        throw e2;
+      }
+      if (!snap.exists() || !snap.data() || snap.data().active !== true) throw { code: 'bad-invite' };
+      return c;
+    }
+    // ok＝可以進入。no-profile＝登入了但沒有個人檔也沒有舊資料。denied＝規則拒絕讀取舊資料。
+    // 讀個人檔被拒（規則尚未包含這條路徑）不當成整個人被擋，改看既有的 state/main。
+    async function accountMayEnter(uid) {
+      try {
+        const profile = await getDoc(doc(fbDb, 'users', uid));
+        if (profile.exists()) return 'ok';
+      } catch (e2) {
+        if (!isPermissionDenied(e2)) throw e2;
+      }
+      try {
+        const state = await getDoc(doc(fbDb, 'users', uid, 'state', 'main'));
+        return state.exists() ? 'ok' : 'no-profile';
+      } catch (e2) {
+        if (isPermissionDenied(e2)) return 'denied';
+        throw e2;
+      }
+    }
+
+    function LoginScreen({ notice }) {
       const [email, setEmail] = useState('');
       const [password, setPassword] = useState('');
       const [invite, setInvite] = useState('');
@@ -3698,9 +3759,24 @@
         setErr(''); setBusy(true);
         try {
           if (mode === 'register') {
-            if ((invite || '').trim() !== INVITE_CODE) throw { code: 'bad-invite' };
             if (password.length < 6) throw { code: 'auth/weak-password' };
-            await createUserWithEmailAndPassword(fbAuth, email.trim(), password);
+            // 先確認邀請碼，再建立登入帳號。碼不對就不會產生帳號。
+            // beginRegistration 讓登入守門先等個人檔寫完，避免個人檔還沒建好就去讀資料。
+            beginRegistration();
+            let cred = null;
+            try {
+              const code = await assertInviteActive(invite);
+              cred = await createUserWithEmailAndPassword(fbAuth, email.trim(), password);
+              try {
+                await setDoc(doc(fbDb, 'users', cred.user.uid), { inviteCode: code, createdAt: Date.now() });
+              } catch (e3) {
+                try { await deleteUser(cred.user); } catch (e4) {}
+                if (isPermissionDenied(e3)) throw { code: 'invite-rejected' };
+                throw e3;
+              }
+            } finally {
+              endRegistration();
+            }
           } else {
             await signInWithEmailAndPassword(fbAuth, email.trim(), password);
           }
@@ -3714,7 +3790,9 @@
             'auth/user-not-found': '查無此帳號，請先建立帳號',
             'auth/wrong-password': '密碼錯誤',
             'auth/too-many-requests': '嘗試太多次，請稍後再試',
-            'bad-invite': '邀請碼不正確。請向管理者（Mandy）索取邀請碼才能註冊。'
+            'bad-invite': '邀請碼不正確。請向管理者（Mandy）索取邀請碼才能註冊。',
+            'invite-unavailable': '暫時無法確認邀請碼。請稍後再試；若一直失敗，請聯絡管理者確認雲端規則已更新。',
+            'invite-rejected': '邀請碼沒有通過雲端驗證，帳號沒有建立。請確認邀請碼，或聯絡管理者。'
           };
           setErr(map[e2.code] || ('發生錯誤：' + (e2.code || e2.message || e2)));
         } finally { setBusy(false); }
@@ -3730,6 +3808,7 @@
                 <div className="text-xs text-slate-400">任務管理系統</div>
               </div>
             </div>
+            {notice && <div className="mb-4 text-sm text-rose-600 bg-rose-50 rounded-xl px-3 py-2 font-bold">{notice}</div>}
             <form onSubmit={submit} className="flex flex-col gap-3">
               <label className="text-sm font-bold text-slate-600">電子郵件
                 <input type="email" value={email} onChange={e=>setEmail(e.target.value)} required autoComplete="username"
@@ -3741,7 +3820,7 @@
               </label>
               {mode === 'register' && (
                 <label className="text-sm font-bold text-slate-600">邀請碼
-                  <input type="text" value={invite} onChange={e=>setInvite(e.target.value)} required
+                  <input type="text" value={invite} onChange={e=>setInvite(e.target.value)} required autoComplete="off" spellCheck="false"
                     className="mt-1 w-full px-3 py-2.5 rounded-xl border border-slate-200 outline-none focus:border-indigo-400 text-slate-700" placeholder="向管理者索取的邀請碼" />
                   <span className="block mt-1 text-xs font-normal text-slate-400">沒有邀請碼無法註冊（防止陌生人使用）。</span>
                 </label>
@@ -3773,11 +3852,52 @@
     // ── 登入狀態守門 ─────────────────────────────────────────
     function AuthGate() {
       const [user, setUser] = useState(undefined); // undefined=檢查中, null=未登入
-      useEffect(() => onAuthStateChanged(fbAuth, u => setUser(u)), []);
+      const [blockMsg, setBlockMsg] = useState('');
+      useEffect(() => {
+        let generation = 0;
+        return onAuthStateChanged(fbAuth, async (u) => {
+          const gen = ++generation;
+          const still = () => gen === generation;
+          if (!u) {
+            if (!still()) return;
+            setBlockMsg(pendingBlockMsg);
+            pendingBlockMsg = '';
+            setUser(null);
+            return;
+          }
+          await waitIfRegistering();
+          if (!still()) return;
+          const current = fbAuth.currentUser;
+          if (!current) {
+            setBlockMsg(pendingBlockMsg);
+            pendingBlockMsg = '';
+            setUser(null);
+            return;
+          }
+          try {
+            const access = await accountMayEnter(current.uid);
+            if (!still()) return;
+            if (access === 'ok') {
+              setBlockMsg('');
+              setUser(current);
+              return;
+            }
+            // 沒有個人檔、也沒有舊資料：登出，避免空帳號留在系統裡。既有使用者走得到 ok，不會進這裡。
+            pendingBlockMsg = '這個帳號還沒完成註冊（沒有有效邀請碼）。請向管理者索取邀請碼後，用「建立帳號」重新註冊。';
+            await signOut(fbAuth);
+          } catch (e2) {
+            if (!still()) return;
+            // 網路暫時失敗時不要登出，避免既有使用者被踢掉。寫入仍由雲端規則把關。
+            console.error('account check failed', e2);
+            setBlockMsg('');
+            setUser(current);
+          }
+        });
+      }, []);
       if (user === undefined) {
         return <div className="min-h-screen flex items-center justify-center text-slate-400 font-bold">載入中…</div>;
       }
-      if (!user) return <LoginScreen />;
+      if (!user) return <LoginScreen notice={blockMsg} />;
       return <TaskManager uid={user.uid} userEmail={user.email} />;
     }
 

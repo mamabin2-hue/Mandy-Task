@@ -5,6 +5,13 @@
 
 線上版：https://mamabin2-hue.github.io/Mandy-Task/
 
+版本：**2026.11.09**
+
+此倉庫先前沒有獨立版本號，變更記在 `建置進度.md` 的日期段落。從這次起沿用同一種日期寫法當版本號。
+
+### 變更紀錄
+- **2026.11.09**：邀請碼自網頁移除。有效邀請碼改放 Firestore `invites/{邀請碼}`（欄位 `active: true`），由 `firestore.rules` 在伺服器端檢查。已經註冊、已有雲端資料的使用者不必重填。換碼不用改程式。回滾方式見 `建置進度.md`。
+
 ---
 
 ## 1. 這是什麼
@@ -34,7 +41,8 @@
 ## 3. 技術架構
 
 - **前端**：單檔 `index.html`。React 18 + ReactDOM + Babel standalone（瀏覽器即時編譯 JSX）＋ Tailwind(CDN)。lucide-react 圖示走 esm.sh，firebase 走 gstatic。無打包、無 node 後端。
-- **登入**：Firebase Auth（Email/密碼）。`setPersistence(browserLocalPersistence)` → 長期登入。
+- **登入**：Firebase Auth（Email/密碼）。`setPersistence(browserLocalPersistence)` → 長期登入。註冊時另寫個人檔 `users/{uid}`（`inviteCode`、`createdAt`），規則會先確認邀請碼。
+- **邀請碼**：Firestore 文件 `invites/{邀請碼}`，內容只有 `{ active: true }`。客戶端只能用已經知道的文件 ID 做 `get`，不能列出整包，也不能自己寫。檔案裡沒有邀請碼字串。
 - **資料庫**：Firestore。**整份 state 存單一文件** `users/{uid}/state/main`：
   ```
   { tasks, projects, users, notes, catMap, knowledge, deletedNotes, boardColumns, focusZones, noteSheets, writeId, updatedAt }
@@ -54,19 +62,16 @@
 
 1. **建一個 Firebase 專案**（免費 Spark 方案即可，不用綁卡）：開啟 Authentication(Email/密碼) 與 Firestore Database。
 2. **換掉 `index.html` 裡的 `firebaseConfig`**（約在檔案上方 `const firebaseConfig = {...}`）成你自己專案的 Web 設定（apiKey 等；apiKey 是可公開的網頁金鑰，安全由下面的規則 + 登入把關）。
-3. **設定 Firestore 安全規則**（每人只能讀寫自己 uid 底下的資料）：
-   ```
-   rules_version = '2';
-   service cloud.firestore {
-     match /databases/{database}/documents {
-       match /users/{userId}/{document=**} {
-         allow read, write: if request.auth != null && request.auth.uid == userId;
-       }
-     }
-   }
-   ```
-4. **部署**：把 `index.html`(+`.nojekyll`) 放到 GitHub repo，開啟 GitHub Pages（Settings → Pages → 由 main branch 根目錄）。免費 Pages 需 repo 為 **Public**（repo 公開的只是程式碼，使用者資料在 Firebase、靠登入保護，不會外洩）。
-5. **邀請碼**：`index.html` 內 `const INVITE_CODE = '...'`。要分享給同事就把網址＋邀請碼給他，他自行註冊，資料各自隔離。
+3. **設定 Firestore 安全規則**：完整內容在 `firestore.rules`（不要改回「只要登入就能寫自己的資料」那種舊規則）。重點：
+   - `invites/{邀請碼}`：允許 `get` 單筆、拒絕 `list`、客戶端不能寫。
+   - 建立 `users/{uid}` 個人檔時，規則用 `exists()` / `get()` 確認該邀請碼文件存在且 `active == true`。
+   - 已有 `users/{uid}/state/main` 的舊帳號，不必補個人檔，仍可讀寫自己的 `state`、`backups`、`backups_meta`、`control`。
+   - 兩者都沒有的帳號，不能讀寫任何任務資料。
+   - 發布方式（二擇一，只動規則，不要部署其他服務）：
+     - 主控台：Firestore Database → 規則 → 貼上 `firestore.rules` → 發布。
+     - 指令：`npx firebase-tools deploy --only firestore:rules --project mandy-task`（需已登入 Firebase CLI）。不要下沒有 `--only firestore:rules` 的 deploy。
+4. **建立一組邀請碼**（不要把碼寫進 git）：Firestore → 開始集合，集合 ID `invites`，文件 ID 就是邀請碼（自己產生一組夠長、不好猜的；大小寫要一致），欄位 `active`、類型 **boolean**、值 `true`。想換碼就新增另一份文件，把舊文件的 `active` 改成 `false`。不要把以前寫在網頁裡的那組舊碼建成 active。
+5. **部署網頁**：把 `index.html`(+`.nojekyll`) 放到 GitHub repo，開啟 GitHub Pages（Settings → Pages → 由 main branch 根目錄）。免費 Pages 需 repo 為 **Public**（repo 公開的只是程式碼，使用者資料在 Firebase、靠登入保護，不會外洩）。要分享給同事就把網址私下加上邀請碼給他，他自行註冊，資料各自隔離。規則要先發布，新網頁的註冊才驗得到邀請碼。
 
 做完就是一個能用的網站，不需要伺服器、不需要付費。
 
@@ -88,13 +93,16 @@
 
 - **repo 公開 ≠ 資料公開**：公開的是程式碼；使用者的任務/筆記在 Firestore，**每個帳號只能看自己的**(靠 Auth + 上面的規則)，沒有帳號密碼進不去。
 - 網頁 `apiKey` 是設計成可公開的（Firebase Web 金鑰），真正把關的是登入 + Firestore 規則。
-- 真正的隱私控制 = **邀請碼 / 是否開放註冊**，不是 repo 可見性。
+- 真正的隱私控制 = **伺服器上的邀請碼文件是否 active**，不是 repo 可見性，也不是把邀請碼寫在網頁裡。舊碼還留在 git 歷史與可能的網頁快取；只要 Firestore 沒有把它設成 `active: true`，就不能拿來註冊。
+- 這個專案沒有後端、也沒有 Cloud Functions（維持免綁卡）。Firebase Authentication 仍允許呼叫「建立帳號」API，規則擋不住那一步；沒有有效邀請碼的人建得出空的登入帳號，但建不了個人檔、也讀寫不了任務資料，網頁會把他登出。
 
 ---
 
 ## 7. 檔案
 
-- `index.html` — 整個 Web App（唯一必要檔）。
+- `index.html` — 整個 Web App（唯一必要的網頁檔）。
+- `firestore.rules` — Firestore 安全規則（邀請碼與資料隔離）。需另外發布到 Firebase，放在 repo 裡不會自動生效。
+- `firebase.json` / `.firebaserc` — 只用來部署上述規則（以及本機模擬器測試）。沒有 Hosting 設定。
 - `.nojekyll` — 讓 GitHub Pages 原樣提供檔案。
 - `建置進度.md` / `需求規劃_v1.md` — 開發歷程與需求紀錄。
 - `.gitignore` — 排除含金鑰的本機腳本資料夾。
