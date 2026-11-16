@@ -2512,7 +2512,7 @@
                 data = orderColumn(data);
                 const Icon = style.icon;
                 return (
-                <div key={col.id} className={`flex-1 w-full flex flex-col gap-4 p-4 rounded-3xl border ${style.bg}`} onDragOver={e=>e.preventDefault()} onDrop={(e)=>{ const taskId = e.dataTransfer.getData('taskId'); if(taskId) moveTaskRelative(taskId, null, col.id); }}>
+                <div key={col.id} className={`flex-1 lg:basis-0 lg:min-w-[360px] w-full flex flex-col gap-4 p-4 rounded-3xl border ${style.bg}`} onDragOver={e=>e.preventDefault()} onDrop={(e)=>{ const taskId = e.dataTransfer.getData('taskId'); if(taskId) moveTaskRelative(taskId, null, col.id); }}>
                   <div className="flex items-center justify-between px-2">
                     <h3 className={`text-lg font-black ${style.text} flex items-center gap-2`}><Icon className={`w-5 h-5 ${style.iconColor}`} /> {col.title}</h3>
                     <span className="bg-white text-slate-500 text-sm font-black px-3 py-1 rounded-full shadow-sm border border-slate-200">{data.length}</span>
