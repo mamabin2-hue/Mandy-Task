@@ -2549,6 +2549,8 @@
         const sheetOf = (n) => { const s = n && n.sheet; if (s && sheetIds.has(s)) return s; return (n && n.stashed) ? 'stashed' : 'active'; };
         const curTab = sheetIds.has(notesTab) ? notesTab : 'active';
         const moveNoteToSheet = (noteId, sid) => setNotes(notes.map(n => n.id === noteId ? { ...n, sheet: sid, stashed: sid === 'stashed' } : n));
+        // 選了相關人員、且有同名的自訂分頁（例：Jeff）→ 便利貼自動歸到那個分頁，不用再拖過去
+        const sheetForTag = (tag) => { const t = String(tag || '').trim().toLowerCase(); if (!t) return null; const s = sheetList.find(x => !x.builtin && String(x.title || '').trim().toLowerCase() === t); return s ? s.id : null; };
         const addSheet = () => { const name = (window.prompt('新增便利貼分頁名稱（例如：薪資、合約、待跟進…）：', '') || '').trim(); if (!name) return; setNoteSheets(normalizeNoteSheets([...sheetList.filter(s => s.id !== 'stashed'), { id: 'ns_' + Date.now().toString(36), title: name, builtin: false }, { id: 'stashed', title: '暫存', builtin: true }])); };
         const renameSheet = (sid) => { const cur = sheetList.find(s => s.id === sid); const name = (window.prompt('分頁名稱：', cur ? cur.title : '') || '').trim(); if (!name) return; setNoteSheets(sheetList.map(s => s.id === sid ? { ...s, title: name } : s)); };
         const deleteSheet = (sid) => { const cur = sheetList.find(s => s.id === sid); if (!cur) return; if (!window.confirm('刪除分頁「' + cur.title + '」？\n裡面的便利貼不會不見，會移回「目前」。')) return; setNotes(notes.map(n => (n && sheetOf(n) === sid) ? { ...n, sheet: 'active', stashed: false } : n)); setNoteSheets(sheetList.filter(s => s.id !== sid)); if (notesTab === sid) setNotesTab('active'); };
@@ -2589,7 +2591,8 @@
                            const colorEl = document.querySelector('#noteColorPicker > div.ring-indigo-500');
                            const color = colorEl ? colorEl.dataset.color : 'bg-yellow-100/70';
                            const tag = document.getElementById('noteUserSelect').value;
-                           setNotes([{id: Date.now().toString(), text, color, tag, createdAt: new Date().toISOString()}, ...notes]);
+                           const tagSheet = sheetForTag(tag);
+                           setNotes([{id: Date.now().toString(), text, color, tag, ...(tagSheet ? { sheet: tagSheet } : {}), createdAt: new Date().toISOString()}, ...notes]);
                            document.getElementById('newNoteInput').value = '';
                            try { localStorage.removeItem(noteDraftKey); } catch (err) {}
                            setNoteDraftSaved(false);
@@ -2660,7 +2663,7 @@
                      )}
                      <div className="flex items-center justify-between mt-auto pt-4 border-t border-black/5 gap-2">
                         <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                        <select className="text-xs font-black bg-white/60 px-2 py-1.5 rounded-lg text-slate-700 outline-none cursor-pointer hover:bg-white/80 transition-colors border-none shadow-sm" value={note.tag || ''} onChange={(e) => setNotes(notes.map(n => n.id === note.id ? {...n, tag: e.target.value} : n))}>
+                        <select className="text-xs font-black bg-white/60 px-2 py-1.5 rounded-lg text-slate-700 outline-none cursor-pointer hover:bg-white/80 transition-colors border-none shadow-sm" value={note.tag || ''} onChange={(e) => { const v = e.target.value; const sid = sheetForTag(v); setNotes(notes.map(n => n.id === note.id ? (sid ? {...n, tag: v, sheet: sid, stashed: false} : {...n, tag: v}) : n)); }}>
                            <option value="">- 無相關人員 -</option>{users.map(u => <option key={u} value={u}>@ {u}</option>)}
                         </select>
                         <select value={sheetOf(note)} onChange={(e) => moveNoteToSheet(note.id, e.target.value)} title="移到哪個分頁" className="text-xs font-black bg-indigo-50 text-indigo-700 px-2 py-1.5 rounded-lg outline-none cursor-pointer hover:bg-indigo-100 transition-colors border-none shadow-sm">
